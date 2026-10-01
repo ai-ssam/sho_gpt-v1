@@ -1,0 +1,13 @@
+MediaPipe Tasks Vision runtime 0.10.14
+Source: https://www.npmjs.com/package/@mediapipe/tasks-vision/v/0.10.14
+Copyright Google LLC. Licensed under the Apache License, Version 2.0.
+https://www.apache.org/licenses/LICENSE-2.0
+
+Pose Landmarker Lite and Hand Landmarker model bundles (float16 version 1)
+Source: https://storage.googleapis.com/mediapipe-models/
+MediaPipe Models are distributed under Apache License 2.0.
+
+The runtime vision.js is the unmodified npm vision_bundle.cjs file, renamed
+to .js for a standard browser JavaScript MIME type. WASM binaries and model
+bundles are unmodified. Patient images, videos and measurements are not
+included in this distribution.

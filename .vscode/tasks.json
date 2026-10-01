@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ROM Lab: 의존성 설치",
+      "type": "shell",
+      "command": "npm ci",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROM Lab: 실행",
+      "type": "shell",
+      "command": "npm run dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "rom-lab",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*VITE.*",
+          "endsPattern": ".*Local:.*"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "ROM Lab: 테스트",
+      "type": "shell",
+      "command": "npm test",
+      "problemMatcher": []
+    }
+  ]
+}

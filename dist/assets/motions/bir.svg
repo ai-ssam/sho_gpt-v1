@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" role="img" aria-label="후면 기능적 내회전 동작">
+  <rect width="480" height="300" rx="28" fill="#eef6f2"/>
+  <path d="M36 46h100" stroke="#0f8b73" stroke-width="6" stroke-linecap="round"/>
+  <text x="36" y="88" font-family="Arial,sans-serif" font-size="48" font-weight="800" fill="#17211e">BIR</text>
+  <text x="38" y="118" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#0f8b73">BACK VIEW</text>
+  <circle cx="310" cy="58" r="27" fill="#dbeae4" stroke="#17211e" stroke-width="8"/>
+  <path d="M310 88v112M254 113h112M254 113l-20 100M366 113l-30 70M336 183l-26-38M286 200l-27 78M334 200l27 78" fill="none" stroke="#17211e" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M375 216a76 76 0 0 0-56-92" fill="none" stroke="#0f8b73" stroke-width="8" stroke-linecap="round" stroke-dasharray="12 10"/>
+  <path d="m315 115 17 8-13 13" fill="none" stroke="#0f8b73" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

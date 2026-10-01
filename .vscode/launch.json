@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ROM Lab: Chrome에서 실행",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:4173",
+      "webRoot": "${workspaceFolder}/dist",
+      "preLaunchTask": "ROM Lab: 실행"
+    }
+  ]
+}

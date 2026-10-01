@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {JSDOM} from 'jsdom';
+import {indexedDB} from 'fake-indexeddb';
+import {templatePoints,frameRecord,analyzeRom} from '../dist/analysis.mjs';
+
+test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원 (DOM 통합)',async()=>{
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  const dom=new JSDOM(html,{url:'https://example.test',pretendToBeVisual:true});
+  const w=dom.window;
+  for(const key of ['window','document','localStorage','HTMLElement','Image','FileReader'])globalThis[key]=key==='window'?w:w[key];
+  Object.defineProperty(globalThis,'navigator',{value:w.navigator,configurable:true});
+  globalThis.indexedDB=indexedDB;globalThis.confirm=()=>true;globalThis.requestAnimationFrame=cb=>setTimeout(cb,0);
+  w.scrollTo=()=>{};w.HTMLElement.prototype.scrollIntoView=()=>{};
+  w.HTMLMediaElement.prototype.pause=()=>{};w.HTMLMediaElement.prototype.load=()=>{};
+  const ctx=new Proxy({createLinearGradient:()=>({addColorStop(){}})},{get:(o,k)=>o[k]??(()=>{}),set:(o,k,v)=>(o[k]=v,true)});
+  w.HTMLCanvasElement.prototype.getContext=()=>ctx;
+  const app=await import('../dist/app.js');
+  assert.equal(w.document.body.dataset.view,'capture');assert.equal(w.document.querySelector('#final-analysis').disabled,true);
+  w.document.querySelector('#temporary-patient').click();
+  for(const code of ['AB','FE','ER','BIR','CIR']) {
+    const frames=Array.from({length:10},(_,index)=>{const points=templatePoints(index/9*Math.PI);for(const p of Object.values(points)){p.visibility=1;p.status='detected';p.aspectRatio=16/9;}return{...frameRecord({index,time:index/30,motion:code,points}),sourceFrame:index};});
+    const rom=analyzeRom(frames,'right',code,{cirStartFrame:0,cirEndFrame:9});
+    Object.assign(app.state.sessions[code],{frames,fileName:code+'.mp4',fileSize:100,rom,autoRom:structuredClone(rom),analysisStatus:rom?.valid?'complete':'review',autoRepresentativeFrame:rom?.representativeFrameIndex,finalRepresentativeFrame:rom?.representativeFrameIndex,measuredArm:'right'});
+  }
+  app.setView('capture');assert.equal(w.document.querySelector('#final-analysis').disabled,false);
+  w.document.querySelector('#final-analysis').click();assert.equal(w.document.body.dataset.view,'results');assert.equal(w.document.querySelectorAll('.final-motion').length,5);
+  const original=structuredClone(app.state.sessions.FE);
+  app.openDetail('FE');assert.equal(w.document.body.dataset.view,'detail');assert.notEqual(app.session(),app.state.sessions.FE);
+  const landmarks=w.document.querySelector('#landmark-list').textContent;assert.match(landmarks,/왼쪽 골반/);assert.doesNotMatch(landmarks,/왼쪽 팔꿈치/);assert.match(landmarks,/오른쪽 팔꿈치/);
+  app.session().frames[0].corrected.right_elbow.x=.12;
+  assert.deepEqual(app.state.sessions.FE,original,'수정 중에는 최종값을 변경하지 않음');
+  w.document.querySelector('#discard-detail').click();assert.equal(w.document.body.dataset.view,'results');assert.deepEqual(app.state.sessions.FE,original);
+  app.openDetail('FE');app.session().frames[0].corrected.right_elbow.x=.12;app.session().frames[0].corrected.right_elbow.status='manual';
+  await app.applyDetail();assert.equal(w.document.body.dataset.view,'results');assert.equal(app.state.sessions.FE.frames[0].corrected.right_elbow.x,.12);assert.deepEqual(app.state.sessions.FE.autoRom,original.autoRom);assert.deepEqual(app.state.sessions.FE.frames[0].raw,original.frames[0].raw);
+  const payload=app.patientPayload();assert.doesNotThrow(()=>app.validateImport(payload));assert.equal(payload.measurements.FE.hideOppositeArm,true);assert.equal(payload.measurements.FE.displayTrunk,true);
+  w.document.querySelector('#save-final').click();
+  await new Promise(r=>setTimeout(r,40));
+  assert.ok(w.document.querySelector('#saved-patients').options.length>1);
+  assert.ok(w.document.querySelector('#toast').textContent.includes('저장'));
+  app.state.sessions.FE.videoUrl='blob:keep-on-back';
+  const hide=new w.Event('pagehide');Object.defineProperty(hide,'persisted',{value:true});w.dispatchEvent(hide);
+  assert.equal(app.state.sessions.FE.videoUrl,'blob:keep-on-back','뒤로가기 캐시 복귀 시 영상 연결 유지');
+  app.queue.cancelAll();dom.window.close();
+});

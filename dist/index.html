@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#eef5f2" />
+  <meta name="description" content="영상과 카메라로 어깨 ROM을 측정하고 원본·보정 결과를 보존하는 로컬 분석 도구" />
+  <title>Shoulder ROM Lab</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d6756'/%3E%3Ctext x='5' y='22' font-size='17' fill='white'%3ESR%3C/text%3E%3C/svg%3E" />
+</head>
+<body data-view="capture">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">SR</div>
+      <div><h1>Shoulder ROM Lab</h1><p>동작별 가동범위 측정 · 관절점 보정 · v4.0.2</p></div>
+    </div>
+    <div class="privacy-pill" title="영상은 서버에 업로드되지 않습니다."><span class="privacy-dot"></span>브라우저 내 처리</div>
+  </header>
+
+  <main>
+    <nav class="workflow-nav card" aria-label="측정 진행 단계">
+      <div><strong id="workflow-title">1. 영상 등록</strong><p id="workflow-status" role="status" aria-live="polite">0 / 5 동작 등록 · 영상을 올리면 자동 분석을 시작합니다.</p></div>
+      <div class="workflow-actions"><button id="back-upload" class="button ghost" hidden>영상 등록으로</button><button id="final-analysis" class="button primary" disabled>최종 분석 · 결과 보기</button><button id="discard-detail" class="button ghost" hidden>수정 취소 · 결과로</button><button id="apply-detail" class="button primary" hidden>수정 내용 반영</button></div>
+    </nav>
+    <div id="job-list" class="job-list" aria-label="동작별 분석 진행 상황"></div>
+    <section class="workspace" aria-labelledby="workspace-title">
+      <div class="section-heading">
+        <div><span class="eyebrow">01 · PATIENT & MOTION</span><h2 id="workspace-title">환자와 측정 동작 설정</h2></div>
+        <p>동작별 영상을 등록하세요. 다른 동작을 선택해도 분석은 계속 진행됩니다.</p>
+      </div>
+
+      <article class="patient-card card">
+        <div class="panel-title-row patient-title">
+          <div><span class="eyebrow">PATIENT PROFILE</span><h3>측정대상 기본정보</h3></div>
+          <div class="patient-tools">
+            <select id="saved-patients" aria-label="저장 환자 불러오기"><option value="">저장 환자 선택</option></select>
+            <button id="load-patient" class="button ghost" type="button">불러오기</button>
+            <button id="temporary-patient" class="button dark" type="button">임시환자</button>
+            <button id="new-patient" class="button ghost" type="button">새 측정</button>
+            <button id="delete-patient" class="button ghost" type="button">저장 삭제</button>
+            <label class="button ghost" for="import-json">JSON 복원</label><input id="import-json" type="file" accept="application/json,.json" hidden />
+          </div>
+        </div>
+        <div class="patient-form">
+          <label class="field"><span>환자번호 *</span><input id="patient-id" maxlength="30" placeholder="예: P-2026-001" /></label>
+          <label class="field"><span>이름</span><input id="patient-name" maxlength="30" placeholder="이름 또는 이니셜" /></label>
+          <label class="field"><span>성별 *</span><select id="patient-gender"><option value="">선택</option><option value="남성">남성</option><option value="여성">여성</option><option value="기타">기타</option></select></label>
+          <label class="field"><span>나이 *</span><input id="patient-age" type="number" min="1" max="120" step="1" placeholder="세" /></label>
+          <fieldset class="arm-field"><legend>측정할 팔 *</legend><label><input type="radio" name="arm" value="left" /><span>왼팔</span></label><label><input type="radio" name="arm" value="right" /><span>오른팔</span></label></fieldset>
+          <div class="profile-state"><span id="patient-state-dot"></span><strong id="patient-state">필수정보 미입력</strong></div>
+        </div>
+      </article>
+
+      <div class="motion-heading">
+        <div><span class="eyebrow">MOTION PROTOCOL</span><h3>측정 동작 선택</h3></div>
+        <div class="motion-heading-actions">
+          <p>카드를 선택하면 해당 동작의 영상·분석결과로 전환됩니다.</p>
+          <label class="button ghost small" for="motion-image-input">선택 동작 이미지 변경</label>
+          <input id="motion-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
+        </div>
+      </div>
+      <div id="motion-grid" class="motion-grid" role="listbox" aria-label="어깨 측정 동작">
+        <button class="motion-card selected" type="button" data-motion="AB" aria-selected="true">
+          <span class="motion-top"><b>AB</b><i>정면</i></span>
+          <img class="motion-image" src="./assets/motions/ab.svg" alt="외전 AB 동작 안내" />
+          <strong>외전</strong><span>팔을 옆으로 어깨높이까지</span><small>어깨–팔꿈치 각도</small><em class="upload-state">영상 없음</em>
+        </button>
+        <button class="motion-card" type="button" data-motion="FE" aria-selected="false">
+          <span class="motion-top"><b>FE</b><i>측면</i></span>
+          <img class="motion-image" src="./assets/motions/fe.svg" alt="굴곡 FE 동작 안내" />
+          <strong>굴곡</strong><span>팔을 앞으로 들어 올리기</span><small>어깨–팔꿈치 각도</small><em class="upload-state">영상 없음</em>
+        </button>
+        <button class="motion-card" type="button" data-motion="ER" aria-selected="false">
+          <span class="motion-top"><b>ER</b><i>측면</i></span>
+          <img class="motion-image" src="./assets/motions/er.svg" alt="신전 ER 동작 안내" />
+          <strong>신전</strong><span>팔을 뒤로 보내기</span><small>어깨–팔꿈치 각도</small><em class="upload-state">영상 없음</em>
+        </button>
+        <button class="motion-card" type="button" data-motion="BIR" aria-selected="false">
+          <span class="motion-top"><b>BIR</b><i>후면</i></span>
+          <img class="motion-image" src="./assets/motions/bir.svg" alt="기능적 내회전 BIR 동작 안내" />
+          <strong>기능적 내회전</strong><span>손등을 등 뒤로 올리기</span><small>척추 도달 높이</small><em class="upload-state">영상 없음</em>
+        </button>
+        <button class="motion-card" type="button" data-motion="CIR" aria-selected="false">
+          <span class="motion-top"><b>CIR</b><i>측면</i></span>
+          <img class="motion-image" src="./assets/motions/cir.svg" alt="회전 궤적 CIR 동작 안내" />
+          <strong>회전 궤적</strong><span>팔꿈치 90° 후 원 그리기</span><small>궤적·흔들림</small><em class="upload-state">영상 없음</em>
+        </button>
+      </div>
+
+      <details id="camera-panel" class="card camera-panel">
+        <summary>카메라 촬영 · 초기 설정 <span>권한은 연결 버튼을 누를 때만 요청합니다.</span></summary>
+        <div class="camera-content">
+          <div class="camera-settings">
+            <label class="field"><span>카메라 장치</span><select id="camera-device"><option value="">기본 카메라</option></select></label>
+            <label class="field"><span>촬영 방향</span><select id="camera-facing"><option value="environment">후면 / 외장</option><option value="user">전면</option></select></label>
+            <label class="field"><span>요청 해상도</span><select id="camera-resolution"><option value="720">HD 720p</option><option value="1080">Full HD 1080p</option><option value="480">480p · 저사양</option></select></label>
+            <label class="field"><span>요청 FPS</span><select id="camera-fps"><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
+            <label class="field"><span>촬영 카운트다운</span><select id="camera-countdown"><option value="3">3초</option><option value="5">5초</option><option value="0">없음</option></select></label>
+            <label class="check-field"><input id="camera-mirror" type="checkbox" />미리보기 좌우 반전 <small>분석·원본은 반전하지 않음</small></label>
+          </div>
+          <div class="camera-preview-wrap"><video id="camera-preview" autoplay muted playsinline></video><div class="camera-guide" aria-hidden="true"><span id="camera-guide-text">머리·몸통·측정 팔 전체가 화면 안에 들어오도록 거리 조절</span><i></i></div><strong id="camera-counter" aria-live="assertive"></strong></div>
+          <div class="camera-actions"><button id="camera-connect" class="button primary">카메라 연결 / 설정 적용</button><button id="camera-record" class="button dark" disabled>촬영 시작</button><button id="camera-stop" class="button ghost" disabled>촬영 중지</button><button id="camera-disconnect" class="button ghost" disabled>카메라 끄기</button><button id="camera-download" class="button ghost" disabled>촬영 원본 저장</button></div>
+          <p id="camera-status" role="status">환자와 측정 팔을 설정한 뒤 카메라를 연결하세요. 음성은 녹음하지 않습니다.</p>
+          <p class="helper">카메라를 고정하고 어깨 높이에 맞추세요. AB 정면 · FE/ER/CIR 측면 · BIR 후면. 측면에서는 측정 팔이 카메라 쪽에 오도록 합니다. 한 영상에 한 동작, 최대 2분을 촬영합니다.</p>
+        </div>
+      </details>
+      <div class="workspace-grid">
+        <article class="viewer-card card">
+          <div class="toolbar measurement-toolbar">
+            <label id="upload-label" class="button primary disabled" for="video-upload"><span aria-hidden="true">＋</span><span id="upload-label-text">AB 영상 선택</span></label>
+            <input id="video-upload" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" hidden disabled />
+            <p id="upload-feedback" role="status" aria-live="polite"></p>
+            <label class="compact-field fps-field"><span>원본 영상 FPS</span><input id="source-fps" type="number" min="1" max="120" step="0.001" value="30" inputmode="decimal" /></label>
+            <label class="compact-field fps-field"><span>분석 간격</span><span class="frame-step-control"><input id="frame-step" type="number" min="1" max="30" step="1" value="1" inputmode="numeric" /><b>프레임</b></span></label>
+            <button id="analyze-button" class="button dark" type="button" disabled>현재 동작 재분석</button>
+            <button id="cancel-analysis" class="button ghost" type="button" hidden>분석 취소</button>
+            <div class="active-protocol"><span id="active-view">정면 촬영</span><strong id="active-measure">어깨–팔꿈치 각도</strong></div>
+          </div>
+
+          <div class="validation-bar" aria-label="샘플영상 자동검증">
+            <div class="validation-title"><span>목표 테스트</span><strong id="hand-model-state">Pose 분석</strong></div>
+            <label class="compact-field"><span id="validation-metric">목표 ROM</span><input id="validation-target" type="number" step="0.1" placeholder="예: 150" /></label>
+            <label class="compact-field"><span>허용 오차</span><span class="frame-step-control"><input id="validation-tolerance" type="number" min="0" step="0.1" value="5" /><b>±</b></span></label>
+            <div class="validation-summary"><strong id="frame-coverage">분석 전</strong><span id="validation-result" class="validation-result">목표값을 입력하면 분석 직후 자동 판정합니다.</span></div>
+          </div>
+
+          <div id="video-stage" class="video-stage empty" aria-label="영상 및 관절점 오버레이">
+            <video id="video" playsinline preload="metadata"></video>
+            <canvas id="overlay" aria-label="드래그 가능한 관절점"></canvas>
+            <div id="empty-state" class="empty-state"><div class="empty-icon" aria-hidden="true">▶</div><strong id="empty-title">환자정보 입력 후 AB 영상을 선택하세요</strong><span id="empty-guide">정면에서 팔 전체와 몸통이 보이도록 촬영</span></div>
+            <div id="progress-panel" class="progress-panel" hidden><div class="spinner" aria-hidden="true"></div><strong id="progress-title">포즈 모델 준비 중</strong><span id="progress-detail">잠시만 기다려 주세요.</span><div class="progress-track"><i id="progress-bar"></i></div></div>
+          </div>
+
+          <div class="timeline-wrap">
+            <input id="frame-slider" type="range" min="0" max="0" value="0" aria-label="분석 프레임 이동" disabled />
+            <div class="player-controls">
+              <div class="control-group"><button id="prev-frame" class="icon-button" type="button" disabled>−1</button><button id="play-toggle" class="play-button" type="button" disabled>▶</button><button id="next-frame" class="icon-button" type="button" disabled>+1</button></div>
+              <div class="time-readout"><strong id="current-time">00:00.000</strong><span>/</span><span id="duration-time">00:00.000</span></div>
+              <div class="legend"><span><i class="dot raw"></i> 원본</span><span><i class="dot corrected"></i> 보정</span></div>
+            </div>
+          </div>
+          <div id="status-line" class="status-line" role="status">환자 기본정보를 입력해 주세요.</div>
+        </article>
+
+        <aside class="correction-card card" aria-labelledby="correction-title">
+          <div class="panel-title-row"><div><span class="eyebrow">ROM & FRAME EDITOR</span><h3 id="correction-title">현재 프레임</h3></div><span id="frame-badge" class="badge">프레임 —</span></div>
+          <div class="rom-focus"><span id="rom-label">측정 팔 ROM</span><strong id="rom-value">—</strong><small id="rom-detail">분석 전</small></div>
+          <div id="motion-detail" class="motion-detail" hidden>
+            <div><span id="detail-a-label">세부값</span><strong id="detail-a-value">—</strong><small id="detail-a-meta">—</small></div>
+            <div><span id="detail-b-label">세부값</span><strong id="detail-b-value">—</strong><small id="detail-b-meta">—</small></div>
+          </div>
+          <div class="metric-pair"><div id="left-angle-card"><span>왼쪽 어깨각</span><strong id="left-angle">—</strong></div><div id="right-angle-card"><span>오른쪽 어깨각</span><strong id="right-angle">—</strong></div></div>
+          <label class="field"><span>구간 라벨</span><select id="phase-label" disabled><option value="미분류">미분류</option><option value="준비">준비</option><option value="진입">진입</option><option value="최대ROM">최대 ROM</option><option value="복귀">복귀</option><option value="완료">완료</option></select></label>
+          <div class="frame-selection-tools">
+            <div class="mini-heading"><span>대표 프레임</span><strong id="representative-status">자동 선택</strong></div>
+            <div class="frame-action-grid"><button id="set-representative" class="button dark small" type="button" disabled>현재 프레임 지정</button><button id="restore-representative" class="button ghost small" type="button" disabled>자동 선택 복원</button></div>
+            <div id="cir-range-actions" class="frame-action-grid" hidden><button id="set-cir-start" class="button ghost small" type="button" disabled>CIR 시작 지정</button><button id="set-cir-end" class="button ghost small" type="button" disabled>CIR 종료 지정</button></div>
+            <button id="restore-cir" class="button ghost small" hidden>자동 CIR 구간 복원</button>
+          </div>
+          <div id="bir-settings" class="advanced-settings" hidden>
+            <label class="field"><span>BIR 추적 기준점</span><select id="bir-tracking"><option value="auto">엄지 우선 · 미검출 시 손목</option><option value="thumb">엄지 끝만</option><option value="wrist">손목 지정</option></select></label>
+            <label class="field"><span>사용자 확정 척추 레벨</span><select id="bir-level"><option value="">자동 추정 유지 · 미확정</option><option>T7</option><option>T9</option><option>T12</option><option>L1</option><option>L3</option><option>L5</option><option>천골</option></select></label>
+            <p class="helper">척추 번호를 영상에서 직접 검출하지 않습니다. 어깨–골반 상대 높이를 환산한 시험 기준이며, 사용자가 확인·수정해야 합니다.</p>
+          </div>
+          <div id="cir-settings" class="advanced-settings" hidden>
+            <label class="field"><span>짧은 미검출 연결 허용 (원본 프레임)</span><input id="gap-frames" type="number" min="0" max="15" step="1" value="5" /></label>
+            <label class="field"><span>연결 최대 시간 (초)</span><input id="gap-seconds" type="number" min="0" max=".5" step=".01" value=".2" /></label>
+            <p class="helper">두 조건을 모두 만족하는 양쪽 검출점 사이만 시간 보간합니다. 긴 공백은 연결하지 않습니다. 시험 기준이며 임상 판정 기준이 아닙니다.</p>
+          </div>
+          <p id="analysis-audit" class="audit-note"></p>
+          <div class="landmark-list-wrap"><div class="mini-heading"><span>관절점 좌표</span><span id="edit-count">보정 0개</span></div><div id="landmark-list" class="landmark-list"><div class="blank-list">분석 결과가 여기에 표시됩니다.</div></div></div>
+          <div class="coordinate-editor"><div class="mini-heading"><span id="selected-point-name">선택된 점 없음</span><span>정규화 좌표</span></div><div class="coordinate-grid"><label>원본 X<input id="raw-x" readonly value="—" /></label><label>원본 Y<input id="raw-y" readonly value="—" /></label><label>보정 X<input id="corrected-x" type="number" min="0" max="1" step="0.001" disabled /></label><label>보정 Y<input id="corrected-y" type="number" min="0" max="1" step="0.001" disabled /></label></div></div>
+          <div class="panel-actions"><button id="reset-frame" class="button ghost" type="button" disabled>프레임 초기화</button><button id="refresh-snapshot" class="button ghost" type="button">대표 이미지 갱신</button><button id="save-patient" class="button primary" type="button" disabled>환자 데이터 저장</button></div>
+          <p class="helper">청록색 점을 드래그하면 ROM이 즉시 다시 계산됩니다. 원본 좌표는 그대로 보존됩니다.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="results" aria-labelledby="results-title">
+      <div id="final-summary" class="final-summary"></div>
+      <div class="section-heading results-heading">
+        <div><span class="eyebrow">02 · ROM RESULTS</span><h2 id="results-title">환자별 가동범위 결과</h2><p id="result-patient">환자를 입력하면 결과가 연결됩니다.</p></div>
+        <div class="results-actions"><button id="save-final" class="button primary" type="button">전체 결과 저장</button><button id="export-csv" class="button ghost" type="button" disabled>현재 동작 CSV</button><button id="export-json" class="button dark" type="button" disabled>환자 전체 JSON</button></div>
+      </div>
+
+      <div id="motion-result-strip" class="motion-result-strip"></div>
+
+      <div class="summary-grid rom-summary-grid">
+        <div class="summary-card rom-primary"><span id="summary-rom-label">측정 팔 ROM</span><strong id="summary-rom">—</strong><small id="summary-rom-detail">현재 동작 분석 전</small></div>
+        <div class="summary-card"><span id="summary-max-label">최대 각도</span><strong id="summary-max">—</strong><small id="summary-max-time">최대 프레임 —</small></div>
+        <div class="summary-card"><span id="summary-min-label">최소 각도</span><strong id="summary-min">—</strong><small id="summary-min-time">최소 프레임 —</small></div>
+        <div class="summary-card"><span>추정 품질</span><strong id="summary-quality">—</strong><small id="summary-frames">분석 프레임 0개</small></div>
+      </div>
+
+      <div class="results-grid">
+        <article class="chart-card card"><div class="panel-title-row"><div><span class="eyebrow">RANGE OF MOTION</span><h3 id="chart-title">측정 팔 어깨각 변화</h3></div><div class="chart-legend"><span><i class="line measured"></i>측정 팔</span><span><i class="line opposite"></i>반대 팔</span></div></div><div id="angle-chart" class="angle-chart" role="img"><div class="chart-empty">ROM 분석 결과가 준비되면 그래프가 표시됩니다.</div></div></article>
+        <article class="snapshot-card card"><div class="panel-title-row"><div><span class="eyebrow">ROM IMAGE</span><h3>ROM 대표 프레임 이미지</h3><small id="snapshot-meta" class="snapshot-meta">자동 대표 프레임</small></div><button id="download-snapshot" class="button ghost small" type="button" disabled>JPG 저장</button></div><div id="snapshot-wrap" class="snapshot-wrap"><div class="chart-empty">분석 후 ROM 대표 프레임이 저장됩니다.</div></div></article>
+      </div>
+
+      <article class="table-card card full-table"><div class="panel-title-row"><div><span class="eyebrow">FRAME DATA</span><h3>현재 동작 프레임 데이터</h3></div><span id="table-count" class="badge">0행</span></div><div class="table-scroll"><table><thead><tr><th>프레임</th><th>시간</th><th>동작</th><th>구간</th><th>측정 팔 각도</th><th>반대 팔 각도</th><th>품질</th><th>보정</th></tr></thead><tbody id="results-body"><tr><td colspan="8" class="empty-cell">분석 데이터가 없습니다.</td></tr></tbody></table></div><div class="pagination"><button id="page-prev" class="icon-button" type="button" disabled>이전</button><span id="page-label">1 / 1</span><button id="page-next" class="icon-button" type="button" disabled>다음</button></div></article>
+      <p class="medical-note">2D 영상 기반 측정 보조 도구입니다. 촬영 각도·가림·렌즈 왜곡의 영향을 받으며 의료 진단을 대신하지 않습니다. 영상은 서버에 업로드하지 않습니다. 저장 결과는 이 브라우저에만 남으며 공용기기에서는 저장 후 삭제하세요. JSON 백업에 개인정보·좌표·대표 이미지가 포함됩니다. 화면 프레임 번호는 1부터, 내보내기 원본 인덱스는 0부터 시작합니다.</p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js?v=4.0.2"></script>
+</body>
+</html>
