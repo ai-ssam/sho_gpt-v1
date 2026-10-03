@@ -1,6 +1,7 @@
 import {AutoCapture,poseState} from './v5-core.mjs';
 import {InferenceClient} from './inference.mjs';
 import {POSE_LANDMARKS} from './geometry.mjs';
+import {templatePose,DEFAULT_CAPTURE} from './neutral.mjs';
 export function cameraError(error) {
   return ({NotAllowedError:'카메라 권한이 거부되었습니다. 주소창의 사이트 권한에서 카메라를 허용한 뒤 다시 연결하세요.',NotFoundError:'연결된 카메라가 없습니다. USB 카메라 연결을 확인하세요.',NotReadableError:'카메라를 사용할 수 없습니다. 다른 촬영 앱을 종료한 뒤 다시 시도하세요.',OverconstrainedError:'요청한 해상도 또는 카메라를 지원하지 않습니다. 720p / 30 FPS로 변경하세요.',SecurityError:'보안 연결(HTTPS)에서 카메라를 사용할 수 있습니다.'})[error?.name]||error?.message||'카메라 연결에 실패했습니다.';
 }
@@ -8,6 +9,7 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
   const $=s=>document.querySelector(s),root=$('#camera-panel'),preview=$('#camera-preview'),status=$('#camera-status');
   let stream=null,recorder=null,chunks=[],countdown=null,timer=null,started=0,generation=0,captureContext=null,lastFile=null,lastUrl=null,settings=null;
   const live=new InferenceClient(),auto=new AutoCapture();live.maxEdge=480;let liveTimer=null,liveRunning=false;
+  let captureSettings={...DEFAULT_CAPTURE},neutralTemplate=null,lastContext='';
   const sound=text=>{
     const mode=$('#v5-sound')?.value??'beep';
     if(mode==='off')return;
@@ -19,18 +21,22 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
     const token=generation;
     try{
       if($('#v5-auto')?.checked){
+        const contextKey=getContext().motion+':'+getContext().arm;
+        if(lastContext!==contextKey){auto.reset();lastContext=contextKey;}
         if(!live.worker)await live.initialize(false);
         const r=await live.detect(preview,false,getContext().arm);
         if(token!==generation)return;
         const points=r.poses?.[0]?Object.fromEntries(POSE_LANDMARKS.map(p=>[p.id,{...r.poses[0][p.index],aspectRatio:preview.videoWidth/preview.videoHeight}])):null;
         const world=r.world?.[0]?Object.fromEntries(POSE_LANDMARKS.map(p=>[p.id,r.world[0][p.index]])):null;
-        const recording=recorder?.state==='recording',p=poseState(points,world,getContext().arm,getContext().motion);
+        const recording=recorder?.state==='recording',context=getContext();
+        const template=neutralTemplate?.motion===context.motion&&neutralTemplate.arm===context.arm?neutralTemplate:null;
+        const p=template?templatePose(points,context.arm,template):poseState(points,world,context.arm,context.motion);
         if(!countdown){
           const action=auto.update(p,performance.now(),recording);
           if(action==='start')record();if(action==='stop')stop();
         }
-        const hint=$('#v5-pose-state');if(hint)hint.textContent=!p.valid?'몸통과 측정 팔을 화면에 맞추세요.':recording?(auto.moved?'시작자세로 돌아오면 종료됩니다.':'동작을 1회 수행하세요.'):'시작자세를 1.5초 유지하세요.';
-      }
+        const hint=$('#v5-pose-state');if(hint)hint.textContent=!p.valid?'몸통과 측정 팔을 화면에 맞추세요.':recording?(auto.moved?`시작자세로 돌아와 ${captureSettings.returnSeconds}초 유지하면 종료됩니다.`:'동작을 1회 수행하세요.'):`시작자세를 ${captureSettings.startSeconds}초 유지하세요. · ${template?'등록 기준 '+template.version:'기본 시험 기준'}`;
+      }else auto.reset();
     }catch(error){const hint=$('#v5-pose-state');if(hint)hint.textContent='자동 감지 실패 · 수동 촬영을 이용하세요. '+error.message;live.reset();if($('#v5-auto'))$('#v5-auto').checked=false;}
     finally{liveRunning=false;if(stream)liveTimer=setTimeout(watch,200);}
   }
@@ -60,7 +66,7 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
     if(!stream||recorder?.state==='recording'||countdown)return;
     const context=getContext();if(!context.valid){toast('환자정보를 확인하세요.');return;}
     if(typeof MediaRecorder==='undefined'){status.textContent='이 브라우저는 녹화를 지원하지 않습니다. 기기 카메라로 촬영한 영상을 업로드하세요.';return;}
-    captureContext={...context};busy(true);persist();
+    captureContext={...context,captureSettings:structuredClone(captureSettings),neutralTemplate:neutralTemplate?.motion===context.motion&&neutralTemplate.arm===context.arm?structuredClone(neutralTemplate):null};busy(true);persist();
     let remaining=Number($('#camera-countdown').value);$('#camera-counter').textContent=remaining||'';
     if(remaining)sound(remaining);
     const begin=()=>{
@@ -78,7 +84,7 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
           if(lastUrl)URL.revokeObjectURL(lastUrl);lastUrl=URL.createObjectURL(lastFile);$('#camera-download').disabled=false;
           status.textContent=`촬영 완료 · ${duration.toFixed(1)}초 · 분석 영상으로 연결 중`;
           release();
-          try{await onRecorded(lastFile,{...settings,recordedDuration:duration},captureContext);status.textContent='촬영 완료 · 자동 분석을 시작했습니다. 다음 동작을 등록하세요. 원본 영상을 별도로 저장할 수 있습니다.';}catch(error){status.textContent=error.message;}
+          try{await onRecorded(lastFile,{...settings,recordedDuration:duration,captureSettings:captureContext.captureSettings,neutralTemplate:captureContext.neutralTemplate},captureContext);status.textContent='촬영 완료 · 자동 분석을 시작했습니다. 다음 동작을 등록하세요. 원본 영상을 별도로 저장할 수 있습니다.';}catch(error){status.textContent=error.message;}
         };
         started=performance.now();recorder.start(500);sound('시작');root.classList.add('recording');
         timer=setInterval(()=>{const elapsed=(performance.now()-started)/1000;status.textContent=`● 녹화 중 · ${elapsed.toFixed(1)}초 · ${captureContext.motion} / ${captureContext.arm==='left'?'왼팔':'오른팔'}`;if(elapsed>=120)stop();},200);
@@ -93,5 +99,5 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
   for(const input of root.querySelectorAll('select,input'))input.addEventListener('change',()=>{persist();if(stream&&!recorder?.state?.includes('recording'))status.textContent='설정을 변경했습니다. 카메라 연결을 다시 눌러 적용하세요.';});
   navigator.mediaDevices?.addEventListener?.('devicechange',()=>devices().catch(()=>{}));
   window.addEventListener('pagehide',()=>{stop();release();if(lastUrl)URL.revokeObjectURL(lastUrl);});
-  return {release,stop:()=>{stop();release();},isRecording:()=>!!countdown||recorder?.state==='recording'};
+  return {release,stop:()=>{stop();release();},isRecording:()=>!!countdown||recorder?.state==='recording',configure:(options,template)=>{if(recorder?.state==='recording'||countdown)throw Error('촬영 후 설정을 변경하세요.');auto.configure(options);captureSettings={...options};neutralTemplate=template?structuredClone(template):null;}};
 }

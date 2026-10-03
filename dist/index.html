@@ -6,15 +6,16 @@
   <meta name="theme-color" content="#eef5f2" />
   <meta name="description" content="영상과 카메라로 어깨 ROM을 측정하고 원본·보정 결과를 보존하는 로컬 분석 도구" />
   <title>Shoulder ROM Lab</title>
-  <link rel="stylesheet" href="./styles.css?v=5.0.0" />
-  <link rel="stylesheet" href="./v5.css?v=5.0.0" />
+  <link rel="stylesheet" href="./styles.css?v=5.2.0" />
+  <link rel="stylesheet" href="./v5.css?v=5.2.0" />
+  <link rel="stylesheet" href="./v52.css?v=5.2.0" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d6756'/%3E%3Ctext x='5' y='22' font-size='17' fill='white'%3ESR%3C/text%3E%3C/svg%3E" />
 </head>
 <body data-view="capture">
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">SR</div>
-      <div><h1>Shoulder ROM Lab</h1><p>동작별 가동범위 측정 · 관절점 보정 · v5.0.0</p></div>
+      <div><h1>Shoulder ROM Lab</h1><p>동작별 가동범위 측정 · 관절점 보정 · v5.2.0</p></div>
     </div>
     <div class="privacy-pill" title="영상은 서버에 업로드되지 않습니다."><span class="privacy-dot"></span>브라우저 내 처리</div>
   </header>
@@ -160,7 +161,7 @@
             <button id="restore-cir" class="button ghost small" hidden>자동 CIR 구간 복원</button>
           </div>
           <div id="bir-settings" class="advanced-settings" hidden>
-            <label class="field"><span>BIR 추적 기준점</span><select id="bir-tracking"><option value="auto">엄지 우선 · 미검출 시 손목</option><option value="thumb">엄지 끝만</option><option value="wrist">손목 지정</option></select></label>
+            <label class="field"><span>BIR 추적 기준점</span><select id="bir-tracking" disabled><option value="wrist">손목 (고정)</option></select></label>
             <label class="field"><span>사용자 확정 척추 레벨</span><select id="bir-level"><option value="">자동 추정 유지 · 미확정</option><option>T7</option><option>T9</option><option>T12</option><option>L1</option><option>L3</option><option>L5</option><option>천골</option></select></label>
             <p class="helper">척추 번호를 영상에서 직접 검출하지 않습니다. 어깨–골반 상대 높이를 환산한 시험 기준이며, 사용자가 확인·수정해야 합니다.</p>
           </div>
@@ -205,6 +206,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./app.js?v=5.0.0"></script>
+  <script type="module" src="./app.js?v=5.2.0"></script>
 </body>
 </html>

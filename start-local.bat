@@ -14,6 +14,6 @@ if not exist node_modules (
     exit /b 1
   )
 )
-echo Open http://localhost:4173 in Chrome or Edge.
+echo Open http://localhost:4174 in Chrome or Edge (v5.2).
 call npm run dev
 pause

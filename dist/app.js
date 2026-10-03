@@ -5,6 +5,7 @@ import {
 } from "./analysis.mjs";
 import {ACTIVE_MOTIONS, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs';
 import {setupV5} from './v5-ui.mjs';
+import {setupV52} from './v52-ui.mjs';
 import { setupCamera } from './camera.mjs';
 import { seekDecodedFrame, inspectVideo } from './media.mjs?v=5.0.0';
 import {AnalysisQueue,workflowStatus} from './workflow.mjs';
@@ -19,7 +20,7 @@ const emptySession = () => ({
   expectedFrames: 0, missedFrames: 0, validation: null, validationTarget: "", validationTolerance: 5,
   loadToken: null, autoRepresentativeFrame: null, manualRepresentativeFrame: null,
   finalRepresentativeFrame: null, representativeSelectionType: "auto", snapshotSourceFrame: null,
-  cirManualStartFrame: null, cirManualEndFrame: null, autoRom: null, birManualSpineLevel: null, birTrackingPoint: 'auto', gapFrames: 5, gapSeconds: .2, measuredArm: null
+  cirManualStartFrame: null, cirManualEndFrame: null, autoRom: null, birManualSpineLevel: null, birTrackingPoint: 'wrist', gapFrames: 5, gapSeconds: .2, measuredArm: null
 });
 
 const elements = {
@@ -410,7 +411,7 @@ async function analyzeSession(code,item,signal) {
   try {
     await loadAnalysisVideo(video,item.videoUrl,signal);
     if(signal.aborted)return;
-    const withHands=code==='BIR'||code==='CIR';
+    const withHands=code==='CIR';
     await engine.initialize(withHands);
     const fps=item.sourceFps||30,step=item.frameStep||1;
     const duration=item.frameTimes?.length?item.duration:video.duration;
@@ -454,7 +455,7 @@ async function analyzeSession(code,item,signal) {
     item.performance={elapsedMs:performance.now()-startedAt,delegate:engine.delegate,processedFrames:targets.length};
     item.measurementConfirmed=false;
     const previousBirLevel=item.birManualSpineLevel,previousBirTracking=item.birTrackingPoint;
-    if(!refining)item.birTrackingPoint='auto';
+    if(!refining)item.birTrackingPoint='wrist';
     Object.assign(item,{frames,rom,autoRom:structuredClone(rom),duration,videoWidth:video.videoWidth,videoHeight:video.videoHeight,expectedFrames:targets.length,missedFrames:missed,manualRepresentativeFrame:null,cirManualStartFrame:null,cirManualEndFrame:null,birManualSpineLevel:null,updatedAt:new Date().toISOString(),persistedOnly:false,snapshot:null});
     if(refining){item.birManualSpineLevel=previousBirLevel;item.birTrackingPoint=previousBirTracking;item.expectedFrames=frames.length;item.manualRepresentativeFrame=previousManualSource==null?null:frames.findIndex(f=>f.sourceFrame===previousManualSource);delete item.refineRange;}
     syncRepresentativeState(item);
@@ -713,6 +714,7 @@ function recalculateAllRom() {
 
 function recalculateCurrentRom() {
   const activeSession = session();
+  if(state.activeMotion==='BIR')activeSession.birTrackingPoint='wrist';
   activeSession.snapshot=null;
   if (activeSession.frames.length && patient().arm) {
     activeSession.rom = analyzeRom(activeSession.frames, patient().arm, state.activeMotion, analysisOptions(activeSession));
@@ -1005,7 +1007,7 @@ function patientPayload() {
     const item = state.sessions[code];
     measurements[code] = {
       ...auditFields(item,item.measuredArm||patient().arm,code),
-      analysisRange:item.analysisRange, measurementConfirmed:item.measurementConfirmed,performance:item.performance,
+      analysisRange:item.analysisRange, measurementConfirmed:item.measurementConfirmed,performance:item.performance, captureSettings:item.captureSettings, neutralTemplate:item.neutralTemplate,
       autoRom:item.autoRom, birManualSpineLevel:item.birManualSpineLevel, birTrackingPoint:item.birTrackingPoint,
       analysisStatus:item.analysisStatus,analysisError:item.analysisError,videoWidth:item.videoWidth,videoHeight:item.videoHeight,
       stillImageDecodeVerification:item.stillImageDecodeVerification,stillImageSeekTime:item.stillImageSeekTime,
@@ -1028,7 +1030,7 @@ function patientPayload() {
     };
   }
   return {
-    schemaVersion: "5.0", patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
+    schemaVersion: "5.0", appVersion:"5.2.0", patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
     privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
   };
 }
@@ -1265,7 +1267,7 @@ async function loadVideoFile(file, cameraSettings=null) {
     validationTolerance: Number(elements.validationTolerance.value) || 0,
     loadToken: `${Date.now()}-${Math.random().toString(36).slice(2)}`
   };
-  Object.assign(activeSession,info,{sourceFps:info.sourceFps||cameraSettings?.frameRate||activeSession.sourceFps,cameraSettings,measuredArm:patient().arm});
+  Object.assign(activeSession,info,{sourceFps:info.sourceFps||cameraSettings?.frameRate||activeSession.sourceFps,cameraSettings,measuredArm:patient().arm,captureSettings:cameraSettings?.captureSettings??null,neutralTemplate:cameraSettings?.neutralTemplate??null});
   boundPatient=patient();
   elements.sourceFps.value=String(activeSession.sourceFps);
   state.sessions[code] = activeSession;
@@ -1519,7 +1521,7 @@ elements.downloadSnapshot.addEventListener("click", async () => {
 function renderAdvanced() {
   const item=session(),r=item.rom;
   $('#bir-settings').hidden=state.activeMotion!=='BIR';$('#cir-settings').hidden=state.activeMotion!=='CIR';$('#restore-cir').hidden=state.activeMotion!=='CIR';
-  $('#bir-tracking').value=item.birTrackingPoint||'auto';$('#bir-level').value=item.birManualSpineLevel||'';
+  $('#bir-tracking').value='wrist';$('#bir-level').value=item.birManualSpineLevel||'';
   $('#gap-frames').value=item.gapFrames??5;$('#gap-seconds').value=item.gapSeconds??.2;
   $('#camera-guide-text').textContent=`${state.activeMotion} · ${MOTION_DEFINITIONS[state.activeMotion].view} · ${armName()} 전체와 몸통이 보이게 촬영`;
   const fmt=v=>Number.isFinite(v)?v.toFixed(1):'—';
@@ -1669,4 +1671,5 @@ try{
   }
 }catch{/* Invalid or unavailable session storage must not prevent startup. */}
 setupV5({state,session,patient,camera,queue,engine,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload});
+setupV52({state,session,patient,camera,queue,selectMotion,setView,renderAll,showToast});
 export {state,session,selectMotion,openDetail,applyDetail,setView,patientPayload,validateImport,renderAll,queue};

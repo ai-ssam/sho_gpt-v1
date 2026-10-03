@@ -1,5 +1,5 @@
 import {createArchive} from './archive.mjs';
-import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,evaluate,validateCriteria} from './v5-core.mjs';
+import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,DEFAULT_STAGES,evaluate,validateCriteria} from './v5-core.mjs';
 export function setupV5(api){
  const {state,session,patient,camera,queue,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload}=api;
  const $=s=>document.querySelector(s);
@@ -33,6 +33,7 @@ export function setupV5(api){
  document.body.dataset.mode=mode;document.body.dataset.home='true';
  $('#v5-settings-button').onclick=()=>{$('#v5-settings').hidden=!$('#v5-settings').hidden;settingsRows();};
  function settingsRows(){
+  document.dispatchEvent(new window.Event('v52-criteria'));
   const body=$('#v5-criteria-rows');body.replaceChildren();
   for(const k of ACTIVE_MOTIONS){
    const row=document.createElement('tr'),name=document.createElement('th');name.textContent=k;row.append(name);
@@ -51,8 +52,9 @@ export function setupV5(api){
  }catch(e){$('#v5-settings-state').textContent=e.message;}};
  $('#v5-settings-reset').onclick=()=>{try{saveCriteria(structuredClone(DEFAULT_CRITERIA));}catch(e){showToast(e.message);}};
  $('#v5-settings-export').onclick=()=>{
-  const rows=['motion,weight,score,min_inclusive,max_exclusive,categories'];
-  for(const k of ACTIVE_MOTIONS)for(let i=0;i<4;i++){const t=state.criteria.thresholds[k];rows.push([k,state.criteria.weights[k],i,k==='BIR'?'':i===3?0:t[i],k==='BIR'||i===0?'':t[i-1],k==='BIR'?state.criteria.bir[i].join('|'):''].join(','));}
+  const rows=['motion,weight,score,min_inclusive,max_exclusive,categories,display_stages_uri'];
+  const stages=encodeURIComponent(JSON.stringify(state.criteria.stages??DEFAULT_STAGES));
+  for(const k of ACTIVE_MOTIONS)for(let i=0;i<4;i++){const t=state.criteria.thresholds[k];rows.push([k,state.criteria.weights[k],i,k==='BIR'?'':i===3?0:t[i],k==='BIR'||i===0?'':t[i-1],k==='BIR'?state.criteria.bir[i].join('|'):'',stages].join(','));}
   download('shoulder-v5-criteria.csv',new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));
  };
  $('#v5-settings-import').onchange=async e=>{try{
@@ -60,6 +62,7 @@ export function setupV5(api){
   const lines=(await file.text()).replace(/^\uFEFF/,'').trim().split(/\r?\n/).map(l=>l.split(','));
   const header=lines.shift(),col=name=>header.indexOf(name),legacy=header.includes('motion_code');
   const c=structuredClone(DEFAULT_CRITERIA),seen=new Set();
+  if(col('display_stages_uri')>=0){const values=lines.map(r=>r[col('display_stages_uri')]);if(!values[0]||values.some(v=>v!==values[0]))throw Error('3단계 표시 기준이 일치하지 않습니다.');c.stages=JSON.parse(decodeURIComponent(values[0]));}
   for(const r of lines){
    const k=r[col(legacy?'motion_code':'motion')],i=Number(r[col('score')]),key=k+':'+i;
    if(!ACTIVE_MOTIONS.includes(k)||!Number.isInteger(i)||i<0||i>3||seen.has(key))throw Error('CSV 동작/점수 중복 또는 형식 오류');seen.add(key);
@@ -134,7 +137,10 @@ export function setupV5(api){
   const title=document.createElement('h2');title.textContent=score.label;
   const value=document.createElement('strong');value.textContent=score.total===null?'— / 100':score.total.toFixed(1)+' / 100';
   const stage=document.createElement('p');stage.textContent=score.stage+' · 시험 기준 / 질환 확률 아님';
+  stage.textContent=score.stage;stage.className='v52-stage';stage.dataset.color=score.stageColor;
+  const disclaimer=document.createElement('p');disclaimer.textContent='시험 기준 · 동작 제한 분류이며 질환 확률이나 의학적 중증도 확정이 아닙니다.';
   panel.append(title,value,stage);
+  panel.append(disclaimer);
   for(const row of score.rows){const line=document.createElement('span');line.className='v5-score-chip';line.textContent=row.code+' · '+(row.score===null?row.reason:row.score+'/3점');panel.append(line);}
   if(state.legacyMeasurements?.CIR){const note=document.createElement('p');note.textContent='이전 CIR 기록 보존됨 · JSON 내보내기에 포함';panel.append(note);}
  }

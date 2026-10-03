@@ -7,6 +7,7 @@ export function validateCriteria(c){
  for(const k of ['AB','FE','ER','IRER']){const t=c.thresholds?.[k];if(!Array.isArray(t)||t.length!==3||!t.every(Number.isFinite)||!(t[0]>t[1]&&t[1]>t[2]&&t[2]>=0))throw Error(k+' 경계값은 큰 값부터 3개를 입력하세요.');}
  if(!Array.isArray(c.bir)||c.bir.length!==4||c.bir.some(a=>!Array.isArray(a)||!a.length||a.some(x=>typeof x!=='string'||!x.trim())))throw Error('BIR 범주는 4개 구간이 필요합니다.');
  const values=c.bir.flat();if(new Set(values).size!==values.length)throw Error('BIR 범주가 중복되었습니다.');
+ if(c.stages!==undefined)validateStages(c.stages);
  return c;
 }
 export function evaluate(sessions,c=DEFAULT_CRITERIA){
@@ -21,7 +22,21 @@ export function evaluate(sessions,c=DEFAULT_CRITERIA){
  });
  const valid=rows.every(r=>r.score!==null);
  const total=valid?rows.reduce((s,r)=>s+r.score/3*r.weight,0):null;
- return {label:c.label,total,stage:total===null?'평가 보류':total<20?'움직임 제한 적음':total<50?'움직임 제한 주의':'움직임 제한 큼',rows,criteria:structuredClone(c),clinicalValidation:false};
+ const stage=classifyScore(total,c.stages);
+ return {label:c.label,total,stage:stage.label,stageColor:stage.color,rows,criteria:structuredClone(c),clinicalValidation:false};
+}
+export const DEFAULT_STAGES={boundaries:[20,50],labels:['제한 적음','경도','중증도']};
+export function validateStages(stages){
+ const b=stages?.boundaries,l=stages?.labels;
+ if(!Array.isArray(b)||b.length!==2||!b.every(Number.isFinite)||!(0<b[0]&&b[0]<b[1]&&b[1]<100))throw Error('3단계 경계는 0 < 첫 경계 < 둘째 경계 < 100이어야 합니다.');
+ if(!Array.isArray(l)||l.length!==3||l.some(x=>typeof x!=='string'||!x.trim()||x.length>30))throw Error('3단계 문구를 각각 1~30자로 입력하세요.');
+ return stages;
+}
+export function classifyScore(total,stages=DEFAULT_STAGES){
+ validateStages(stages);
+ if(!Number.isFinite(total)||total<0||total>100)return {label:'평가 보류',color:'pending'};
+ const i=total<stages.boundaries[0]?0:total<stages.boundaries[1]?1:2;
+ return {label:stages.labels[i],color:['green','yellow','red'][i]};
 }
 const sub=(a,b)=>[a.x-b.x,a.y-b.y,a.z-b.z];
 const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
@@ -49,7 +64,11 @@ export function externalRotation(world,arm){
  return angle>=-10&&angle<=100?Math.max(0,angle):null;
 }
 export class AutoCapture {
- constructor(){this.reset();}
+ constructor(options={}){this.configure(options);this.reset();}
+ configure({startSeconds=1.5,returnSeconds=1.2}={}){
+  if(![startSeconds,returnSeconds].every(v=>Number.isFinite(v)&&v>0&&v<=60))throw Error('중립 유지시간은 0초 초과 60초 이하로 입력하세요.');
+  this.startMs=startSeconds*1000;this.returnMs=returnSeconds*1000;this.reset();
+ }
  reset(){this.phase='waiting';this.since=null;this.moved=false;}
  update({valid,neutral,excursion},now,recording){
   if(!valid){this.since=null;return null;}
@@ -57,10 +76,10 @@ export class AutoCapture {
    if(this.phase==='done')return null;
    if(!neutral){this.since=null;return null;}
    this.since??=now;
-   if(now-this.since>=1500){this.phase='starting';this.since=null;return 'start';}
+   if(now-this.since>=this.startMs){this.phase='starting';this.since=null;return 'start';}
   }else{
    if(excursion){this.moved=true;this.since=null;}
-   if(this.moved&&neutral){this.since??=now;if(now-this.since>=1200){this.phase='done';return 'stop';}}
+   if(this.moved&&neutral){this.since??=now;if(now-this.since>=this.returnMs){this.phase='done';return 'stop';}}
    else this.since=null;
   }
   return null;
