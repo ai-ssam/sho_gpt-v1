@@ -1,4 +1,4 @@
-export const MOTIONS=['AB','FE','ER','BIR','CIR'];
+export const MOTIONS=['AB','FE','ER','BIR','IRER'];
 export function workflowStatus(sessions) {
   const uploaded=MOTIONS.filter(code=>sessions[code]?.fileName).length;
   const complete=MOTIONS.filter(code=>['complete','review'].includes(sessions[code]?.analysisStatus)).length;
@@ -28,6 +28,6 @@ export class AnalysisQueue {
       try{await this.run(job.code,job.item,job.controller.signal);if(!job.controller.signal.aborted)job.item.analysisStatus=job.item.rom?.valid?'complete':'review';}
       catch(error){if(job.controller.signal.aborted)job.item.analysisStatus='cancelled';else{job.item.analysisStatus='error';job.item.analysisError=error.message||'분석 실패';}}
       finally{this.active=null;this.onChange();}
-    }}finally{this.running=false;}
+    }}finally{this.running=false;this.onChange();}
   }
 }

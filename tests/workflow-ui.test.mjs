@@ -19,10 +19,10 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   const app=await import('../dist/app.js');
   assert.equal(w.document.body.dataset.view,'capture');assert.equal(w.document.querySelector('#final-analysis').disabled,true);
   w.document.querySelector('#temporary-patient').click();
-  for(const code of ['AB','FE','ER','BIR','CIR']) {
+  for(const code of ['AB','FE','ER','BIR','IRER']) {
     const frames=Array.from({length:10},(_,index)=>{const points=templatePoints(index/9*Math.PI);for(const p of Object.values(points)){p.visibility=1;p.status='detected';p.aspectRatio=16/9;}return{...frameRecord({index,time:index/30,motion:code,points}),sourceFrame:index};});
     const rom=analyzeRom(frames,'right',code,{cirStartFrame:0,cirEndFrame:9});
-    Object.assign(app.state.sessions[code],{frames,fileName:code+'.mp4',fileSize:100,rom,autoRom:structuredClone(rom),analysisStatus:rom?.valid?'complete':'review',autoRepresentativeFrame:rom?.representativeFrameIndex,finalRepresentativeFrame:rom?.representativeFrameIndex,measuredArm:'right'});
+    Object.assign(app.state.sessions[code],{frames,fileName:code+'.mp4',fileSize:100,sourceFile:new Blob(['test-video'],{type:'video/mp4'}),rom,autoRom:structuredClone(rom),analysisStatus:rom?.valid?'complete':'review',autoRepresentativeFrame:rom?.representativeFrameIndex,finalRepresentativeFrame:rom?.representativeFrameIndex,measuredArm:'right'});
   }
   app.setView('capture');assert.equal(w.document.querySelector('#final-analysis').disabled,false);
   w.document.querySelector('#final-analysis').click();assert.equal(w.document.body.dataset.view,'results');assert.equal(w.document.querySelectorAll('.final-motion').length,5);
@@ -39,6 +39,18 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   await new Promise(r=>setTimeout(r,40));
   assert.ok(w.document.querySelector('#saved-patients').options.length>1);
   assert.ok(w.document.querySelector('#toast').textContent.includes('저장'));
+  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('shoulder-rom-lab',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  const saved=await new Promise(resolve=>{const request=db.transaction('patients').objectStore('patients').get(payload.patient.id);request.onsuccess=()=>resolve(request.result);});
+  assert.equal(saved.schemaVersion,'5.0');assert.equal(await saved.videos.FE.text(),'test-video');
+  assert.equal(saved.criteria.label,'동작 의심도점수');db.close();
+  w.document.querySelector('#load-patient').click();await new Promise(r=>setTimeout(r,80));
+  assert.equal(await app.state.sessions.FE.sourceFile.text(),'test-video');
+  assert.ok(app.state.sessions.FE.videoUrl.startsWith('blob:'));
+  const beforeWeight=app.state.criteria.weights.AB;
+  const input=w.document.querySelector('[data-code="AB"][data-field="weight"]');input.value='99';
+  w.document.querySelector('#v5-settings-save').click();
+  assert.equal(app.state.criteria.weights.AB,beforeWeight);
+  assert.match(w.document.querySelector('#v5-settings-state').textContent,/100/);
   app.state.sessions.FE.videoUrl='blob:keep-on-back';
   const hide=new w.Event('pagehide');Object.defineProperty(hide,'persisted',{value:true});w.dispatchEvent(hide);
   assert.equal(app.state.sessions.FE.videoUrl,'blob:keep-on-back','뒤로가기 캐시 복귀 시 영상 연결 유지');

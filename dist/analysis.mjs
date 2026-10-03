@@ -1,7 +1,8 @@
-// v4 measurement policy. Display coordinates are normalized; geometry is isotropic.
+import { externalRotation } from './v5-core.mjs';
+// v5 measurement policy; CIR remains available for legacy records.
 export * from './geometry.mjs';
 import { shoulderAngles, elbowAngles, LANDMARKS, isEdited } from './geometry.mjs';
-export const POLICY = Object.freeze({ visibility: .45, shoulderTolerance: .05, gapFrames: 5, gapSeconds: .2, version: '4.0-provisional' });
+export const POLICY = Object.freeze({ visibility: .45, shoulderTolerance: .05, gapFrames: 5, gapSeconds: .2, version: '5.0-provisional' });
 export const usable = p => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.status === 'manual' || Number(p.visibility ?? 0) >= POLICY.visibility);
 export function visiblePointIds(arm, motion) {
   return LANDMARKS.filter(p => !['FE','ER','CIR'].includes(motion) || p.id.endsWith('_shoulder') || p.id.endsWith('_hip') || p.id.startsWith(arm + '_')).map(p=>p.id);
@@ -110,6 +111,12 @@ export function analyzeRom(frames,arm='right',motion='AB',options={}) {
   const angles=frames.map((f,index)=>({index,value:shoulderAngles(f.corrected)[arm]})).filter(r=>Number.isFinite(r.value));
   const min=angles.reduce((a,b)=>b.value<a.value?b:a,{index:null,value:Infinity}),max=angles.reduce((a,b)=>b.value>a.value?b:a,{index:null,value:-Infinity});
   const base={motion,arm,rom:angles.length?max.value-min.value:null,minAngle:angles.length?min.value:null,maxAngle:angles.length?max.value:null,minFrameIndex:min.index,maxFrameIndex:max.index,representativeFrameIndex:max.index,primaryLabel:'어깨 가동범위',primaryValue:angles.length?+(max.value-min.value).toFixed(1):'미검출',primaryUnit:'°',secondaryLabel:angles.length?`${min.value.toFixed(1)}° → ${max.value.toFixed(1)}°`:'유효 관절점 부족',valid:angles.length>0,validFrames:angles.length};
+  if(motion==='IRER') {
+    const rows=frames.map((f,index)=>({index,value:externalRotation(f.worldCorrected??f.worldRaw,arm)})).filter(r=>Number.isFinite(r.value));
+    if(!rows.length)return {...base,valid:false,rom:null,minAngle:null,maxAngle:null,primaryValue:'확인 필요',primaryLabel:'외회전각 (3D 추정)',primaryUnit:'',secondaryLabel:'팔꿈치를 몸통 옆에 붙이고 90°를 유지하세요.',representativeFrameIndex:0};
+    const lo=rows.reduce((a,b)=>a.value<b.value?a:b),hi=rows.reduce((a,b)=>a.value>b.value?a:b);
+    return {...base,valid:true,rom:hi.value-lo.value,minAngle:lo.value,maxAngle:hi.value,minFrameIndex:lo.index,maxFrameIndex:hi.index,representativeFrameIndex:hi.index,primaryValue:+hi.value.toFixed(1),primaryLabel:'최대 외회전각 (3D 추정)',primaryUnit:'°',secondaryLabel:'3D 추정 · 관절점/자세를 확인한 뒤 평가에 반영',validFrames:rows.length};
+  }
   if(motion==='BIR') {
     const reaches=frames.map((f,index)=> {
       const s=f.corrected[arm+'_shoulder'],h=f.corrected[arm+'_hip'],p=trackedHandPoint(f.corrected,arm,'bir',options.birTrackingPoint||'auto');

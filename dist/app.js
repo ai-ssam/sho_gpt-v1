@@ -3,17 +3,19 @@ import {
   editedPointIds, elbowAngles, frameRecord, framesToCsv, nextMonotonicTimestamp, shoulderAngles, summarize,
   templatePoints, trackedHandPoint, resolveRepresentativeFrame, validateAnalysis, usable, visiblePointIds, cirTrack, auditFields
 } from "./analysis.mjs";
+import {ACTIVE_MOTIONS, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs';
+import {setupV5} from './v5-ui.mjs';
 import { setupCamera } from './camera.mjs';
-import { seekDecodedFrame, inspectVideo } from './media.mjs?v=4.0.2';
+import { seekDecodedFrame, inspectVideo } from './media.mjs?v=5.0.0';
 import {AnalysisQueue,workflowStatus} from './workflow.mjs';
 import {InferenceClient,inferenceSize} from './inference.mjs';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const MOTIONS = Object.keys(MOTION_DEFINITIONS);
+const MOTIONS = ACTIVE_MOTIONS;
 const emptySession = () => ({
   fileName: null, fileSize: 0, duration: 0, videoUrl: null, frames: [], rom: null,
-  snapshot: null, sourceFps: 30, frameStep: 1, updatedAt: null, persistedOnly: false,
+  snapshot: null, sourceFps: 30, frameStep: 3, updatedAt: null, persistedOnly: false,
   expectedFrames: 0, missedFrames: 0, validation: null, validationTarget: "", validationTolerance: 5,
   loadToken: null, autoRepresentativeFrame: null, manualRepresentativeFrame: null,
   finalRepresentativeFrame: null, representativeSelectionType: "auto", snapshotSourceFrame: null,
@@ -59,6 +61,7 @@ const elements = {
 };
 
 const state = {
+  criteria: structuredClone(DEFAULT_CRITERIA), legacyMeasurements: {},
   activeMotion: "AB", sessions: Object.fromEntries(MOTIONS.map(code => [code, emptySession()])),
   currentIndex: 0, selectedPoint: "left_shoulder", page: 1, pageSize: 14,
   poseLandmarker: null, handLandmarker: null, visionFileset: null, visionModule: null,
@@ -163,6 +166,9 @@ function updatePatientGate() {
   renderResults();
 }
 
+function frameAngles(frame) {
+  return frame.motion==='IRER'?{left:externalRotation(frame.worldCorrected??frame.worldRaw,'left'),right:externalRotation(frame.worldCorrected??frame.worldRaw,'right')}:shoulderAngles(frame.corrected);
+}
 function currentFrame() { return session().frames[state.currentIndex] ?? null; }
 
 function isSideMotion(code = state.activeMotion) { return ["FE", "ER", "CIR"].includes(code); }
@@ -223,7 +229,7 @@ function clearVideoElement() {
 }
 
 function selectMotion(code) {
-  if (!MOTION_DEFINITIONS[code]) return;
+  if (!MOTIONS.includes(code)) return;
   stopCoordinatePlayback();
   state.activeMotion = code;
   state.currentIndex = 0;
@@ -404,14 +410,18 @@ async function analyzeSession(code,item,signal) {
   try {
     await loadAnalysisVideo(video,item.videoUrl,signal);
     if(signal.aborted)return;
-    const withHands=true;
+    const withHands=code==='BIR'||code==='CIR';
     await engine.initialize(withHands);
     const fps=item.sourceFps||30,step=item.frameStep||1;
     const duration=item.frameTimes?.length?item.duration:video.duration;
     if(!Number.isFinite(duration)||duration<=0)throw Error('영상 길이를 읽지 못했습니다. MP4로 변환하거나 다시 촬영하세요.');
-    const targets=item.frameTimes?.length?item.frameTimes.map((time,sourceFrame)=>({time,sourceFrame})).filter((_,i)=>i%step===0):buildFrameTargets(duration,fps,step);
+    let targets=item.frameTimes?.length?item.frameTimes.map((time,sourceFrame)=>({time,sourceFrame})).filter((_,i)=>i%step===0):buildFrameTargets(duration,fps,step);
+    const range=item.refineRange??item.analysisRange;
+    if(range)targets=targets.filter(t=>t.time>=range.start&&t.time<=range.end);
+    if(!targets.length)throw Error('선택 구간에 분석할 프레임이 없습니다.');
+    const startedAt=performance.now();
     if(targets.length>15000)throw Error('분석할 프레임이 너무 많습니다. 영상을 나누거나 분석 간격을 늘리세요.');
-    const frames=[];let missed=0;
+    let frames=[];let missed=0;
     for(let i=0;i<targets.length;i++) {
       if(signal.aborted)return;
       const {time,sourceFrame}=targets[i];
@@ -426,6 +436,10 @@ async function analyzeSession(code,item,signal) {
       } else {points=templatePoints(0);missed++;}
       for(const point of Object.values(points)){point.aspectRatio=video.videoWidth/video.videoHeight;point.status=usable(point)?'detected':'missing';}
       const frame=frameRecord({index:i,time,motion:code,points,source:result.poses?.length?(withHands?'Pose+Hand':'Pose'):'미검출·수동보정 필요'});
+      if(result.world?.[0]){
+        frame.worldRaw=Object.fromEntries(POSE_LANDMARKS.map(p=>[p.id,{...result.world[0][p.index]}]));
+        frame.worldCorrected=structuredClone(frame.worldRaw);
+      }
       Object.assign(frame,{sourceFrame,sourceFps:fps,decodeTime:decoded.mediaTime,decodeSeekTime:decoded.seekTime,decodeVerification:decoded.verification});
       frames.push(frame);
       item.analysisProgress=(i+1)/targets.length;
@@ -433,9 +447,16 @@ async function analyzeSession(code,item,signal) {
       await new Promise(resolve=>setTimeout(resolve,0));
     }
     if(signal.aborted)return;
-    const rom=analyzeRom(frames,arm,code,{gapFrames:item.gapFrames,gapSeconds:item.gapSeconds});
-    item.birTrackingPoint='auto';
+    const previousManualSource=item.frames[item.manualRepresentativeFrame]?.sourceFrame;
+    const refining=!!item.refineRange;
+    if(refining)frames=mergeRefinement(item.frames,frames);
+    const rom=analyzeRom(frames,arm,code,{gapFrames:item.gapFrames,gapSeconds:item.gapSeconds,birManualSpineLevel:refining?item.birManualSpineLevel:null});
+    item.performance={elapsedMs:performance.now()-startedAt,delegate:engine.delegate,processedFrames:targets.length};
+    item.measurementConfirmed=false;
+    const previousBirLevel=item.birManualSpineLevel,previousBirTracking=item.birTrackingPoint;
+    if(!refining)item.birTrackingPoint='auto';
     Object.assign(item,{frames,rom,autoRom:structuredClone(rom),duration,videoWidth:video.videoWidth,videoHeight:video.videoHeight,expectedFrames:targets.length,missedFrames:missed,manualRepresentativeFrame:null,cirManualStartFrame:null,cirManualEndFrame:null,birManualSpineLevel:null,updatedAt:new Date().toISOString(),persistedOnly:false,snapshot:null});
+    if(refining){item.birManualSpineLevel=previousBirLevel;item.birTrackingPoint=previousBirTracking;item.expectedFrames=frames.length;item.manualRepresentativeFrame=previousManualSource==null?null:frames.findIndex(f=>f.sourceFrame===previousManualSource);delete item.refineRange;}
     syncRepresentativeState(item);
     item.validation=validateAnalysis({frames,expectedFrames:targets.length,rom,motion:code,target:item.validationTarget,tolerance:item.validationTolerance});
     assignPhases(frames,rom);
@@ -574,7 +595,7 @@ function captureSnapshot(frame, rom, options={}) {
   imageCtx.fillStyle = "#dbe8e3";
   imageCtx.font = "12px system-ui";
   const mode = item.representativeSelectionType === "manual" ? "수동 대표" : "자동 대표";
-  const angle=shoulderAngles(frame.corrected)[arm];
+  const angle=frameAngles(frame)[arm];
   imageCtx.fillText(`원본 #${(frame.sourceFrame ?? frame.index) + 1} · ${frame.time.toFixed(3)}초 · ${mode} · 현재각 ${angle?.toFixed(1)??'—'}°`, 28, 59);
   const image=canvas.toDataURL("image/jpeg", 0.84);
   canvas.width=1;canvas.height=1;
@@ -630,6 +651,7 @@ async function selectFrame(index, seek = true) {
   elements.currentTime.textContent = formatTime(frame.time);
   renderFramePanel();
   drawOverlay();
+  document.dispatchEvent(new window.Event('v5-render'));
 }
 
 function renderFramePanel() {
@@ -641,7 +663,9 @@ function renderFramePanel() {
     elements.list.innerHTML = '<div class="blank-list">분석 결과가 여기에 표시됩니다.</div>';
     return;
   }
-  const angles = shoulderAngles(frame.corrected);
+  const angles = frameAngles(frame);
+  elements.leftAngleCard.querySelector('span').textContent=state.activeMotion==='IRER'?'왼쪽 외회전각':'왼쪽 어깨각';
+  elements.rightAngleCard.querySelector('span').textContent=state.activeMotion==='IRER'?'오른쪽 외회전각':'오른쪽 어깨각';
   const edited = editedPointIds(frame);
   elements.frameBadge.textContent = `원본 #${(frame.sourceFrame ?? frame.index) + 1} · 분석 ${frame.index + 1}/${session().frames.length}`;
   elements.leftAngle.textContent = Number.isFinite(angles.left) ? `${angles.left.toFixed(1)}°` : "—";
@@ -794,7 +818,7 @@ function renderResults() {
   elements.summaryMinTime.textContent = minFrame ? `${minFrame.time.toFixed(3)}초 · 원본 프레임 ${(minFrame.sourceFrame ?? minFrame.index) + 1}` : "최소 프레임 —";
   elements.summaryQuality.textContent = summary.quality == null ? "—" : `${Math.round(summary.quality * 100)}%`;
   elements.summaryFrames.textContent = `분석 프레임 ${summary.frameCount}개`;
-  elements.chartTitle.textContent = state.activeMotion === "CIR" ? `${armName()} 엄지 끝 궤적 (손목 대체 없음)` : `${armName()} 어깨각 변화`;
+  elements.chartTitle.textContent = state.activeMotion==='IRER'?`${armName()} 외회전각 (3D 추정)`:state.activeMotion === "CIR" ? `${armName()} 엄지 끝 궤적 (손목 대체 없음)` : `${armName()} 어깨각 변화`;
   elements.chartLegend.hidden = state.activeMotion === "CIR";
   renderMotionDetail();
   renderRepresentativeTools();
@@ -807,6 +831,7 @@ function renderResults() {
   updateMotionCards();
   renderAdvanced();
   setFrameControls(frames.length > 0);
+  document.dispatchEvent(new window.Event('v5-render'));
 }
 
 function svgNode(tag, attributes = {}) {
@@ -839,7 +864,7 @@ function renderChart(frames) {
   const measuredSide = patient().arm === "left" ? "left" : "right";
   const oppositeSide = measuredSide === "left" ? "right" : "left";
   const toPoints = side => frames.map(frame => {
-    const value = shoulderAngles(frame.corrected)[side];
+    const value = frameAngles(frame)[side];
     const x = pad.left + (frame.time / maxTime) * innerW;
     const y = pad.top + innerH - (Math.max(0, Math.min(180, value)) / 180) * innerH;
     return value==null?null:`${x.toFixed(1)},${y.toFixed(1)}`;
@@ -849,7 +874,7 @@ function renderChart(frames) {
   const rom = session().rom;
   for (const index of [rom?.minFrameIndex, rom?.maxFrameIndex].filter(Number.isInteger)) {
     const frame = frames[index];
-    const value = shoulderAngles(frame.corrected)[measuredSide];
+    const value = frameAngles(frame)[measuredSide];
     const x = pad.left + (frame.time / maxTime) * innerW;
     const y = pad.top + innerH - (value / 180) * innerH;
     svg.appendChild(svgNode("circle", { cx: x, cy: y, r: 5, fill: index === rom.maxFrameIndex ? "#d98a25" : "#b9e769", stroke: "#fff", "stroke-width": 2 }));
@@ -925,7 +950,7 @@ function renderTable(frames) {
     const measured = patient().arm === "left" ? "left" : "right";
     const opposite = measured === "left" ? "right" : "left";
     for (const frame of pageFrames) {
-      const angles = shoulderAngles(frame.corrected);
+      const angles = frameAngles(frame);
       const edited = editedPointIds(frame).length;
       const row = document.createElement("tr");
       row.innerHTML = `<td>${(frame.sourceFrame ?? frame.index) + 1}</td><td>${frame.time.toFixed(3)}s</td><td>${frame.motion}</td><td>${frame.phase}</td><td><strong>${angles[measured]?.toFixed(1) ?? "—"}°</strong></td><td>${angles[opposite]?.toFixed(1) ?? "—"}°</td><td><span class="quality${frame.quality < .55 ? " low" : ""}"><i></i>${Math.round(frame.quality * 100)}%</span></td><td>${edited ? `${edited}개` : "—"}</td>`;
@@ -975,11 +1000,12 @@ function nearestPoint(position) {
 }
 
 function patientPayload() {
-  const measurements = {};
+  const measurements = {...state.legacyMeasurements};
   for (const code of MOTIONS) {
     const item = state.sessions[code];
     measurements[code] = {
       ...auditFields(item,item.measuredArm||patient().arm,code),
+      analysisRange:item.analysisRange, measurementConfirmed:item.measurementConfirmed,performance:item.performance,
       autoRom:item.autoRom, birManualSpineLevel:item.birManualSpineLevel, birTrackingPoint:item.birTrackingPoint,
       analysisStatus:item.analysisStatus,analysisError:item.analysisError,videoWidth:item.videoWidth,videoHeight:item.videoHeight,
       stillImageDecodeVerification:item.stillImageDecodeVerification,stillImageSeekTime:item.stillImageSeekTime,
@@ -1002,8 +1028,8 @@ function patientPayload() {
     };
   }
   return {
-    schemaVersion: "4.0", patient: patient(), measurements,
-    privacy: "videos_processed_locally_and_not_persisted", updatedAt: new Date().toISOString()
+    schemaVersion: "5.0", patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
+    privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
   };
 }
 
@@ -1024,8 +1050,8 @@ async function dbPut(record) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("patients", "readwrite");
     transaction.objectStore("patients").put(record);
-    transaction.oncomplete = resolve;
-    transaction.onerror = () => reject(transaction.error);
+    transaction.oncomplete = () => {db.close();resolve();};
+    transaction.onabort = transaction.onerror = () => {db.close();reject(transaction.error||Error('저장이 취소되었습니다.'));};
   });
 }
 
@@ -1221,7 +1247,7 @@ async function loadVideoFile(file, cameraSettings=null) {
   if(requestedCode!==state.activeMotion||requestedPatient!==JSON.stringify(patient())){showToast('영상 정보를 읽는 동안 선택이 변경되었습니다. 해당 동작에서 다시 등록하세요.');return;}
   if(session().frames.length && session().fileName===file.name && session().fileSize===file.size && !session().videoUrl) {
     if(confirm('저장 결과와 같은 원본 파일입니다. 보정 결과를 유지하고 영상만 다시 연결할까요?')) {
-      session().videoUrl=URL.createObjectURL(file);session().persistedOnly=false;session().loadToken=crypto.randomUUID();selectMotion(state.activeMotion);return;
+      session().sourceFile=file;session().videoUrl=URL.createObjectURL(file);session().persistedOnly=false;session().loadToken=crypto.randomUUID();selectMotion(state.activeMotion);return;
     }
   }
   if(session().frames.length&&!confirm('이 동작의 기존 결과를 새 영상으로 교체할까요? 저장하지 않은 보정은 사라집니다.'))return;
@@ -1246,6 +1272,7 @@ async function loadVideoFile(file, cameraSettings=null) {
   state.currentIndex = 0;
   state.page = 1;
   activeSession.videoUrl = URL.createObjectURL(file);
+  activeSession.sourceFile=file;
   activeSession.fileName = file.name;
   activeSession.fileSize = file.size;
   queue.enqueue(code,activeSession);
@@ -1408,6 +1435,7 @@ elements.resetFrame.addEventListener("click", () => {
   const frame = currentFrame();
   if (!frame) return;
   frame.corrected = clonePoints(frame.raw);
+  if(frame.worldRaw){frame.worldCorrected=structuredClone(frame.worldRaw);session().measurementConfirmed=false;}
   recalculateCurrentRom();
   renderAll();
   showToast("현재 프레임의 보정을 초기화했습니다.");
@@ -1418,13 +1446,20 @@ elements.savePatient.addEventListener("click", async () => {
   try {
     elements.savePatient.disabled = true;
     await regenerateCurrentSnapshot();
-    await dbPut(patientPayload());
+    const record=patientPayload();
+    if(navigator.storage?.persist)await navigator.storage.persist().catch(()=>false);
+    record.videos={};
+    for(const code of MOTIONS){const item=state.sessions[code];if(item.fileName){
+      if(!item.sourceFile)throw Error(code+' 원본 영상을 다시 연결해야 결과와 함께 저장할 수 있습니다.');
+      record.videos[code]=item.sourceFile;
+    }}
+    await dbPut(record);
     await refreshSavedPatientList(patient().id);
     renderResults();
-    showToast("환자 기본정보·측정값·ROM 이미지를 저장했습니다.");
+    showToast("결과와 원본 영상을 이 PC 브라우저에 함께 저장했습니다.");
   } catch (error) {
     console.warn(error);
-    showToast("브라우저 저장에 실패했습니다. JSON으로 내보내 주세요.");
+    showToast("저장 실패: "+error.message+" · 원본을 다운로드하고 다시 시도하세요.");
   } finally {
     setFrameControls(session().frames.length > 0);
   }
@@ -1445,9 +1480,12 @@ elements.loadPatient.addEventListener("click", async () => {
     elements.patientAge.value = record.patient.age ?? "";
     elements.armInputs.forEach(input => { input.checked = input.value === record.patient.arm; });
     boundPatient=patient();
+    state.criteria=record.criteria?validateCriteria(record.criteria):structuredClone(DEFAULT_CRITERIA);
+    state.legacyMeasurements=record.measurements?.CIR?{CIR:record.measurements.CIR}:{};
     state.sessions = Object.fromEntries(MOTIONS.map(code => {
       const saved = record.measurements?.[code] ?? {};
       const restored = { ...emptySession(), ...saved, videoUrl: null, persistedOnly: Boolean(saved.frames?.length),analysisStatus:saved.frames?.length?(saved.rom?.valid===false?'review':'complete'):null };
+      if(record.videos?.[code]){restored.sourceFile=record.videos[code];restored.videoUrl=URL.createObjectURL(restored.sourceFile);restored.persistedOnly=false;}
       syncRepresentativeState(restored);
       return [code, restored];
     }));
@@ -1504,9 +1542,10 @@ for(const id of ['gap-frames','gap-seconds'])$('#'+id).onchange=()=>{session().g
 $('#restore-cir').onclick=()=>{session().cirManualStartFrame=null;session().cirManualEndFrame=null;recalculateCurrentRom();renderAll();};
 $('#refresh-snapshot').onclick=async()=>{try{await regenerateCurrentSnapshot();renderResults();showToast(session().snapshot?'대표 이미지를 동기화했습니다.':'원본 영상을 다시 연결한 뒤 대표 이미지를 저장하세요.');}catch(error){showToast(error.message);}};
 $('#new-patient').onclick=()=>{
+  if(state.refining){showToast('정밀 재분석 완료 후 새 검사를 시작하세요.');return;}
   clearUploadRecovery();
   if(MOTIONS.some(code=>state.sessions[code].fileName)&&!confirm('새 측정을 시작할까요? 저장하지 않은 결과는 지워집니다.'))return;
-  camera.stop();queue.cancelAll();engine.reset();revokeSessionUrls();state.sessions=Object.fromEntries(MOTIONS.map(code=>[code,emptySession()]));state.draft=null;boundPatient=null;setPatient({});setView('capture');updatePatientGate();selectMotion('AB');
+  camera.stop();queue.cancelAll();engine.reset();revokeSessionUrls();state.sessions=Object.fromEntries(MOTIONS.map(code=>[code,emptySession()]));state.draft=null;state.legacyMeasurements={};boundPatient=null;setPatient({});setView('capture');updatePatientGate();selectMotion('AB');
 };
 $('#delete-patient').onclick=async()=>{
   const id=elements.savedPatients.value;if(!id){showToast('삭제할 저장 환자를 선택하세요.');return;}
@@ -1514,12 +1553,13 @@ $('#delete-patient').onclick=async()=>{
   try{const db=await openDatabase();await new Promise((resolve,reject)=>{const tx=db.transaction('patients','readwrite');tx.objectStore('patients').delete(id);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);});await refreshSavedPatientList();showToast('저장 기록을 삭제했습니다. 기존 JSON 백업이 있으면 복원할 수 있습니다.');}catch(error){showToast('삭제에 실패했습니다: '+error.message);}
 };
 function validateImport(data) {
-  if(!['3.0','4.0'].includes(data.schemaVersion)||!data.patient?.id||!['left','right'].includes(data.patient.arm)||!data.measurements)throw Error('지원하는 Shoulder ROM Lab JSON이 아닙니다.');
+  if(!['3.0','4.0','5.0'].includes(data.schemaVersion)||!data.patient?.id||!['left','right'].includes(data.patient.arm)||!data.measurements)throw Error('지원하는 Shoulder ROM Lab JSON이 아닙니다.');
   for(const [code,item] of Object.entries(data.measurements)){
-    if(!MOTIONS.includes(code)||!Array.isArray(item.frames)||item.frames.length>30000)throw Error('동작/프레임 형식이 잘못되었습니다.');
+    if(![...MOTIONS,'CIR'].includes(code)||!Array.isArray(item.frames)||item.frames.length>30000)throw Error('동작/프레임 형식이 잘못되었습니다.');
     if(item.snapshot&&!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(item.snapshot))throw Error('잘못된 대표 이미지 형식입니다.');
     item.frames.forEach((frame,index)=>{if(frame.index!==index||!Number.isFinite(frame.time)||frame.time<0||!['미분류','준비','진입','최대ROM','복귀','완료'].includes(frame.phase)||frame.motion!==code)throw Error('프레임 데이터 검증 실패');for(const {id}of LANDMARKS)for(const type of ['raw','corrected']){const p=frame[type]?.[id];if(!p||![p.x,p.y].every(Number.isFinite)||Math.abs(p.x)>10||Math.abs(p.y)>10)throw Error('관절점 좌표 검증 실패');}});
   }
+  if(data.criteria)validateCriteria(data.criteria);
   return data;
 }
 $('#import-json').onchange=async event=>{
@@ -1536,6 +1576,7 @@ function setView(view) {
   $('#final-analysis').hidden=view!=='capture';
   $('#discard-detail').hidden=view!=='detail';$('#apply-detail').hidden=view!=='detail';
   elements.video.pause();renderWorkflow();
+  document.dispatchEvent(new window.Event('v5-render'));
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function renderWorkflow() {
@@ -1555,9 +1596,11 @@ function renderWorkflow() {
   }
   updateMotionCards();
   if(state.view!=='capture')renderFinalSummary();
+  else document.dispatchEvent(new window.Event('v5-render'));
   if(!state.cameraBusy){elements.sourceFps.disabled=!!session().frameTimes?.length||['queued','analyzing'].includes(session().analysisStatus);elements.frameStep.disabled=['queued','analyzing'].includes(session().analysisStatus);}
 }
 function renderFinalSummary() {
+  document.dispatchEvent(new window.Event('v5-render'));
   $('#final-summary').replaceChildren();
   for(const code of MOTIONS) {
     const item=state.sessions[code],card=document.createElement('article');card.className='final-motion';
@@ -1593,7 +1636,7 @@ const engine=new InferenceClient();
 const queue=new AnalysisQueue(analyzeSession,()=>{
   renderWorkflow();
   if(!MOTIONS.some(code=>['queued','analyzing'].includes(state.sessions[code].analysisStatus)))clearUploadRecovery();
-  if(state.view==='results')renderResults();
+  if(state.view==='results'||(state.view==='capture'&&session().frames.length&&!['queued','analyzing'].includes(session().analysisStatus))){elements.slider.max=String(session().frames.length-1);renderResults();}
 });
 state.view='capture';state.draft=null;
 $('#final-analysis').onclick=()=>{
@@ -1625,4 +1668,5 @@ try{
     uploadFeedback(`이전 ${recovery.motion} ${recovery.stage} 작업이 완료되기 전에 화면이 다시 열렸습니다. 입력 정보만 복원했습니다. 저장된 결과는 환자 불러오기로 복원하고, 저장하지 않은 영상은 다시 선택하세요. iOS 앱 안에서 반복되면 Safari에서 이 주소를 직접 열고 ‘파일 선택’을 이용하세요.`);
   }
 }catch{/* Invalid or unavailable session storage must not prevent startup. */}
+setupV5({state,session,patient,camera,queue,engine,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload});
 export {state,session,selectMotion,openDetail,applyDetail,setView,patientPayload,validateImport,renderAll,queue};

@@ -1,0 +1,21 @@
+criteria_version,motion_code,motion_label,metric,unit,weight_percent,score,min_inclusive,max_exclusive,category_values,status
+sample-0.1.0,AB,외전,max_abduction_deg,degree,25,0,150,,,draft_unvalidated
+sample-0.1.0,AB,외전,max_abduction_deg,degree,25,1,120,150,,draft_unvalidated
+sample-0.1.0,AB,외전,max_abduction_deg,degree,25,2,90,120,,draft_unvalidated
+sample-0.1.0,AB,외전,max_abduction_deg,degree,25,3,0,90,,draft_unvalidated
+sample-0.1.0,FE,굴곡,max_flexion_deg,degree,25,0,150,,,draft_unvalidated
+sample-0.1.0,FE,굴곡,max_flexion_deg,degree,25,1,120,150,,draft_unvalidated
+sample-0.1.0,FE,굴곡,max_flexion_deg,degree,25,2,90,120,,draft_unvalidated
+sample-0.1.0,FE,굴곡,max_flexion_deg,degree,25,3,0,90,,draft_unvalidated
+sample-0.1.0,ER,신전,max_extension_deg,degree,10,0,40,,,draft_unvalidated
+sample-0.1.0,ER,신전,max_extension_deg,degree,10,1,30,40,,draft_unvalidated
+sample-0.1.0,ER,신전,max_extension_deg,degree,10,2,20,30,,draft_unvalidated
+sample-0.1.0,ER,신전,max_extension_deg,degree,10,3,0,20,,draft_unvalidated
+sample-0.1.0,BIR,등 뒤 손 올리기,max_reach_category,category,15,0,,,T1|T2|T3|T4|T5|T6|T7|above_T1,draft_unvalidated
+sample-0.1.0,BIR,등 뒤 손 올리기,max_reach_category,category,15,1,,,T8|T9|T10|T11|T12,draft_unvalidated
+sample-0.1.0,BIR,등 뒤 손 올리기,max_reach_category,category,15,2,,,L1|L2|L3|L4|L5,draft_unvalidated
+sample-0.1.0,BIR,등 뒤 손 올리기,max_reach_category,category,15,3,,,sacrum|buttock_or_below|unable_to_reach_behind_back,draft_unvalidated
+sample-0.1.0,IRER,외회전（팔꿈치 몸통 옆）,max_external_rotation_deg,degree,25,0,60,,,draft_unvalidated
+sample-0.1.0,IRER,외회전（팔꿈치 몸통 옆）,max_external_rotation_deg,degree,25,1,40,60,,draft_unvalidated
+sample-0.1.0,IRER,외회전（팔꿈치 몸통 옆）,max_external_rotation_deg,degree,25,2,20,40,,draft_unvalidated
+sample-0.1.0,IRER,외회전（팔꿈치 몸통 옆）,max_external_rotation_deg,degree,25,3,0,20,,draft_unvalidated

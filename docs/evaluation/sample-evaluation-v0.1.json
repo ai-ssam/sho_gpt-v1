@@ -1,0 +1,285 @@
+{
+  "schema_version": "1.0.0",
+  "criteria_version": "sample-0.1.0",
+  "created_at": "2026-10-02",
+  "status": "draft_unvalidated",
+  "clinical_validation": false,
+  "production_use_approved": false,
+  "purpose": "planning_and_test_fixtures",
+  "score_label": "동작 의심도점수",
+  "score_unit": "points_out_of_100",
+  "is_disease_probability": false,
+  "threshold_provenance": "project_proposal_not_published_diagnostic_cutoffs",
+  "active_motion_codes": [
+    "AB",
+    "FE",
+    "ER",
+    "BIR",
+    "IRER"
+  ],
+  "paused_motion_codes": [
+    "CIR"
+  ],
+  "legacy_policy": "retain_CIR_records_do_not_convert_to_IRER",
+  "motions": [
+    {
+      "code": "AB",
+      "label": "외전",
+      "metric": "max_abduction_deg",
+      "unit": "degree",
+      "weight_percent": 25,
+      "bands": [
+        {
+          "score": 0,
+          "min_inclusive": 150,
+          "max_exclusive": null
+        },
+        {
+          "score": 1,
+          "min_inclusive": 120,
+          "max_exclusive": 150
+        },
+        {
+          "score": 2,
+          "min_inclusive": 90,
+          "max_exclusive": 120
+        },
+        {
+          "score": 3,
+          "min_inclusive": 0,
+          "max_exclusive": 90
+        }
+      ],
+      "required": true
+    },
+    {
+      "code": "FE",
+      "label": "굴곡",
+      "metric": "max_flexion_deg",
+      "unit": "degree",
+      "weight_percent": 25,
+      "bands": [
+        {
+          "score": 0,
+          "min_inclusive": 150,
+          "max_exclusive": null
+        },
+        {
+          "score": 1,
+          "min_inclusive": 120,
+          "max_exclusive": 150
+        },
+        {
+          "score": 2,
+          "min_inclusive": 90,
+          "max_exclusive": 120
+        },
+        {
+          "score": 3,
+          "min_inclusive": 0,
+          "max_exclusive": 90
+        }
+      ],
+      "required": true
+    },
+    {
+      "code": "ER",
+      "label": "신전",
+      "metric": "max_extension_deg",
+      "unit": "degree",
+      "weight_percent": 10,
+      "bands": [
+        {
+          "score": 0,
+          "min_inclusive": 40,
+          "max_exclusive": null
+        },
+        {
+          "score": 1,
+          "min_inclusive": 30,
+          "max_exclusive": 40
+        },
+        {
+          "score": 2,
+          "min_inclusive": 20,
+          "max_exclusive": 30
+        },
+        {
+          "score": 3,
+          "min_inclusive": 0,
+          "max_exclusive": 20
+        }
+      ],
+      "required": true
+    },
+    {
+      "code": "BIR",
+      "label": "등 뒤 손 올리기",
+      "metric": "max_reach_category",
+      "unit": "category",
+      "weight_percent": 15,
+      "categories": [
+        {
+          "score": 0,
+          "values": [
+            "T1",
+            "T2",
+            "T3",
+            "T4",
+            "T5",
+            "T6",
+            "T7",
+            "above_T1"
+          ]
+        },
+        {
+          "score": 1,
+          "values": [
+            "T8",
+            "T9",
+            "T10",
+            "T11",
+            "T12"
+          ]
+        },
+        {
+          "score": 2,
+          "values": [
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ]
+        },
+        {
+          "score": 3,
+          "values": [
+            "sacrum",
+            "buttock_or_below",
+            "unable_to_reach_behind_back"
+          ]
+        }
+      ],
+      "required": true
+    },
+    {
+      "code": "IRER",
+      "label": "외회전（팔꿈치 몸통 옆）",
+      "metric": "max_external_rotation_deg",
+      "unit": "degree",
+      "weight_percent": 25,
+      "bands": [
+        {
+          "score": 0,
+          "min_inclusive": 60,
+          "max_exclusive": null
+        },
+        {
+          "score": 1,
+          "min_inclusive": 40,
+          "max_exclusive": 60
+        },
+        {
+          "score": 2,
+          "min_inclusive": 20,
+          "max_exclusive": 40
+        },
+        {
+          "score": 3,
+          "min_inclusive": 0,
+          "max_exclusive": 20
+        }
+      ],
+      "required": true
+    }
+  ],
+  "aggregate": {
+    "formula": "sum(motion_score / 3 * weight_percent)",
+    "range": [
+      0,
+      100
+    ],
+    "classify_before_rounding": true,
+    "display_decimal_places": 1,
+    "missing_or_invalid_policy": "null_score_and_assessment_pending",
+    "renormalize_missing_weights": false,
+    "bands": [
+      {
+        "min_inclusive": 0,
+        "max_exclusive": 20,
+        "max_inclusive": null,
+        "label": "움직임 제한 적음",
+        "color": "green"
+      },
+      {
+        "min_inclusive": 20,
+        "max_exclusive": 50,
+        "max_inclusive": null,
+        "label": "움직임 제한 주의",
+        "color": "yellow"
+      },
+      {
+        "min_inclusive": 50,
+        "max_exclusive": null,
+        "max_inclusive": 100,
+        "label": "움직임 제한 큼",
+        "color": "orange"
+      }
+    ]
+  },
+  "quality": {
+    "numeric_thresholds": null,
+    "threshold_status": "to_be_validated",
+    "invalid_conditions": [
+      "missing_required_motion",
+      "non_finite_or_negative_angle",
+      "tracking_failure",
+      "invalid_pose",
+      "unconfirmed_measurement",
+      "unmapped_BIR_category"
+    ],
+    "invalid_motion_score": null,
+    "poor_detection_is_not_severe_limitation": true
+  },
+  "irer_protocol": {
+    "view": "front",
+    "side": "selected_arm",
+    "elbow_flexion_target_deg": 90,
+    "upper_arm": "alongside_trunk",
+    "start": "forearm_forward_thumb_up",
+    "action": "active_external_rotation_then_return",
+    "external_resistance": false,
+    "measures_strength": false,
+    "includes_internal_rotation": false,
+    "angle_reference": "neutral_forearm_forward_is_zero",
+    "measurement_method_status": "3D_estimation_requires_goniometer_validation",
+    "forbidden_metric": "2D_shoulder_elbow_wrist_angle_as_external_rotation",
+    "compensation_checks": [
+      "elbow_separation_from_trunk",
+      "trunk_rotation",
+      "shoulder_elevation"
+    ],
+    "pose_tolerances": null
+  },
+  "bir_policy": {
+    "primary_metric": "maximum_reach_level",
+    "minimum_elbow_angle": "report_only_not_scored",
+    "tracking": "thumb_preferred_wrist_fallback_flagged",
+    "level_estimate_requires_review": true,
+    "physical_inability_requires_confirmation": true
+  },
+  "persistence": {
+    "save_criteria_snapshot": true,
+    "save_criteria_version": true,
+    "preserve_auto_manual_final": true,
+    "explicit_recalculation_for_criteria_changes": true
+  },
+  "references": [
+    {
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3826176/",
+      "figure": "4a",
+      "use": "starting_posture_reference_only_strength_test_not_ROM_cutoffs"
+    }
+  ]
+}

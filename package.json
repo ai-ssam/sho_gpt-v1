@@ -1,1 +1,15 @@
-{"name":"shoulder-motion-lab","version":"4.0.0","private":true,"type":"module","scripts":{"dev":"vite --config vite.config.js","test":"node --test tests/v4.test.mjs tests/workflow-ui.test.mjs tests/media.test.mjs tests/camera.test.mjs"},"devDependencies":{"fake-indexeddb":"^6.0.1","jsdom":"^26.1.0","vite":"6.4.1"}}
+{
+  "name": "shoulder-motion-lab",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.js",
+    "test": "node --test tests/v4.test.mjs tests/workflow-ui.test.mjs tests/media.test.mjs tests/camera.test.mjs tests/v5.test.mjs"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.1",
+    "jsdom": "^26.1.0",
+    "vite": "6.4.1"
+  }
+}

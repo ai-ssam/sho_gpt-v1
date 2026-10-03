@@ -6,14 +6,15 @@
   <meta name="theme-color" content="#eef5f2" />
   <meta name="description" content="영상과 카메라로 어깨 ROM을 측정하고 원본·보정 결과를 보존하는 로컬 분석 도구" />
   <title>Shoulder ROM Lab</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=5.0.0" />
+  <link rel="stylesheet" href="./v5.css?v=5.0.0" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d6756'/%3E%3Ctext x='5' y='22' font-size='17' fill='white'%3ESR%3C/text%3E%3C/svg%3E" />
 </head>
 <body data-view="capture">
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">SR</div>
-      <div><h1>Shoulder ROM Lab</h1><p>동작별 가동범위 측정 · 관절점 보정 · v4.0.2</p></div>
+      <div><h1>Shoulder ROM Lab</h1><p>동작별 가동범위 측정 · 관절점 보정 · v5.0.0</p></div>
     </div>
     <div class="privacy-pill" title="영상은 서버에 업로드되지 않습니다."><span class="privacy-dot"></span>브라우저 내 처리</div>
   </header>
@@ -64,7 +65,7 @@
         <button class="motion-card selected" type="button" data-motion="AB" aria-selected="true">
           <span class="motion-top"><b>AB</b><i>정면</i></span>
           <img class="motion-image" src="./assets/motions/ab.svg" alt="외전 AB 동작 안내" />
-          <strong>외전</strong><span>팔을 옆으로 어깨높이까지</span><small>어깨–팔꿈치 각도</small><em class="upload-state">영상 없음</em>
+          <strong>외전</strong><span>팔을 옆으로 가능한 만큼 올리기</span><small>어깨–팔꿈치 각도</small><em class="upload-state">영상 없음</em>
         </button>
         <button class="motion-card" type="button" data-motion="FE" aria-selected="false">
           <span class="motion-top"><b>FE</b><i>측면</i></span>
@@ -81,10 +82,10 @@
           <img class="motion-image" src="./assets/motions/bir.svg" alt="기능적 내회전 BIR 동작 안내" />
           <strong>기능적 내회전</strong><span>손등을 등 뒤로 올리기</span><small>척추 도달 높이</small><em class="upload-state">영상 없음</em>
         </button>
-        <button class="motion-card" type="button" data-motion="CIR" aria-selected="false">
-          <span class="motion-top"><b>CIR</b><i>측면</i></span>
-          <img class="motion-image" src="./assets/motions/cir.svg" alt="회전 궤적 CIR 동작 안내" />
-          <strong>회전 궤적</strong><span>팔꿈치 90° 후 원 그리기</span><small>궤적·흔들림</small><em class="upload-state">영상 없음</em>
+        <button class="motion-card" type="button" data-motion="IRER" aria-selected="false">
+          <span class="motion-top"><b>IRER</b><i>정면</i></span>
+          <img class="motion-image" src="./assets/motions/irer.svg" alt="팔꿈치를 몸통 옆에 붙인 외회전 안내" />
+          <strong>외회전</strong><span>팔꿈치 몸통 옆 · 90° 굽힘</span><small>바깥쪽으로 회전</small><em class="upload-state">영상 없음</em>
         </button>
       </div>
 
@@ -102,7 +103,7 @@
           <div class="camera-preview-wrap"><video id="camera-preview" autoplay muted playsinline></video><div class="camera-guide" aria-hidden="true"><span id="camera-guide-text">머리·몸통·측정 팔 전체가 화면 안에 들어오도록 거리 조절</span><i></i></div><strong id="camera-counter" aria-live="assertive"></strong></div>
           <div class="camera-actions"><button id="camera-connect" class="button primary">카메라 연결 / 설정 적용</button><button id="camera-record" class="button dark" disabled>촬영 시작</button><button id="camera-stop" class="button ghost" disabled>촬영 중지</button><button id="camera-disconnect" class="button ghost" disabled>카메라 끄기</button><button id="camera-download" class="button ghost" disabled>촬영 원본 저장</button></div>
           <p id="camera-status" role="status">환자와 측정 팔을 설정한 뒤 카메라를 연결하세요. 음성은 녹음하지 않습니다.</p>
-          <p class="helper">카메라를 고정하고 어깨 높이에 맞추세요. AB 정면 · FE/ER/CIR 측면 · BIR 후면. 측면에서는 측정 팔이 카메라 쪽에 오도록 합니다. 한 영상에 한 동작, 최대 2분을 촬영합니다.</p>
+          <p class="helper">카메라를 고정하고 어깨 높이에 맞추세요. AB 정면 · FE/ER 측면 · IRER 정면 · BIR 후면. 측면에서는 측정 팔이 카메라 쪽에 오도록 합니다. 한 영상에 한 동작, 최대 2분을 촬영합니다.</p>
         </div>
       </details>
       <div class="workspace-grid">
@@ -112,7 +113,7 @@
             <input id="video-upload" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" hidden disabled />
             <p id="upload-feedback" role="status" aria-live="polite"></p>
             <label class="compact-field fps-field"><span>원본 영상 FPS</span><input id="source-fps" type="number" min="1" max="120" step="0.001" value="30" inputmode="decimal" /></label>
-            <label class="compact-field fps-field"><span>분석 간격</span><span class="frame-step-control"><input id="frame-step" type="number" min="1" max="30" step="1" value="1" inputmode="numeric" /><b>프레임</b></span></label>
+            <label class="compact-field fps-field"><span>분석 간격</span><span class="frame-step-control"><input id="frame-step" type="number" min="1" max="30" step="1" value="3" inputmode="numeric" /><b>프레임</b></span></label>
             <button id="analyze-button" class="button dark" type="button" disabled>현재 동작 재분석</button>
             <button id="cancel-analysis" class="button ghost" type="button" hidden>분석 취소</button>
             <div class="active-protocol"><span id="active-view">정면 촬영</span><strong id="active-measure">어깨–팔꿈치 각도</strong></div>
@@ -181,7 +182,7 @@
       <div id="final-summary" class="final-summary"></div>
       <div class="section-heading results-heading">
         <div><span class="eyebrow">02 · ROM RESULTS</span><h2 id="results-title">환자별 가동범위 결과</h2><p id="result-patient">환자를 입력하면 결과가 연결됩니다.</p></div>
-        <div class="results-actions"><button id="save-final" class="button primary" type="button">전체 결과 저장</button><button id="export-csv" class="button ghost" type="button" disabled>현재 동작 CSV</button><button id="export-json" class="button dark" type="button" disabled>환자 전체 JSON</button></div>
+        <div class="results-actions"><button id="save-final" class="button primary" type="button">결과 + 원본 저장</button><button id="export-csv" class="button ghost" type="button" disabled>현재 동작 CSV</button><button id="export-json" class="button dark" type="button" disabled>환자 전체 JSON</button></div>
       </div>
 
       <div id="motion-result-strip" class="motion-result-strip"></div>
@@ -204,6 +205,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./app.js?v=4.0.2"></script>
+  <script type="module" src="./app.js?v=5.0.0"></script>
 </body>
 </html>
