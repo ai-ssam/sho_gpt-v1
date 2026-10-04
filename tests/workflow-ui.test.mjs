@@ -35,6 +35,7 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   app.openDetail('FE');app.session().frames[0].corrected.right_elbow.x=.12;app.session().frames[0].corrected.right_elbow.status='manual';
   await app.applyDetail();assert.equal(w.document.body.dataset.view,'results');assert.equal(app.state.sessions.FE.frames[0].corrected.right_elbow.x,.12);assert.deepEqual(app.state.sessions.FE.autoRom,original.autoRom);assert.deepEqual(app.state.sessions.FE.frames[0].raw,original.frames[0].raw);
   const payload=app.patientPayload();assert.doesNotThrow(()=>app.validateImport(payload));assert.equal(payload.measurements.FE.hideOppositeArm,true);assert.equal(payload.measurements.FE.displayTrunk,true);
+  const unsavedExit=new w.Event('beforeunload',{cancelable:true});w.dispatchEvent(unsavedExit);assert.equal(unsavedExit.defaultPrevented,true);
   w.document.querySelector('#save-final').click();
   await new Promise(r=>setTimeout(r,40));
   assert.ok(w.document.querySelector('#saved-patients').options.length>1);
@@ -43,6 +44,7 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   const saved=await new Promise(resolve=>{const request=db.transaction('exams').objectStore('exams').get(payload.examId);request.onsuccess=()=>resolve(request.result);});
   assert.equal(saved.schemaVersion,'5.0');assert.equal(await saved.videos.FE.text(),'test-video');
   assert.equal(saved.criteria.label,'동작 의심도점수');db.close();
+  const savedExit=new w.Event('beforeunload',{cancelable:true});w.dispatchEvent(savedExit);assert.equal(savedExit.defaultPrevented,false);
   w.document.querySelector('#load-patient').click();await new Promise(r=>setTimeout(r,80));
   assert.equal(await app.state.sessions.FE.sourceFile.text(),'test-video');
   assert.ok(app.state.sessions.FE.videoUrl.startsWith('blob:'));
@@ -84,6 +86,7 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   assert.equal(JSON.parse(localStorage.getItem('shoulder:v5:criteria')).birDivisions,20);
   assert.equal(app.state.defaults.frameStep,5);
   assert.equal(app.patientPayload().criteria.birDivisions,10);
+  $('#full-reapply').click();assert.equal(app.state.criteria.birDivisions,20);assert.equal(app.patientPayload().criteriaHistory.at(-1).criteria.birDivisions,10);assert.equal(app.state.sessions.BIR.measurementSettings.birDivisions,20);assert.equal(app.state.sessions.IRER.measurementConfirmed,false);
   const invalid=structuredClone(app.patientPayload());invalid.measurements.FE2.fe2ExtensionFrame=999;
   assert.throws(()=>app.validateImport(invalid),/극점/);
   invalid.measurements.FE2.fe2ExtensionFrame=null;invalid.measurements.IRER.irerCalibration={arm:'right',reference:'wrist',forearm:-1,oppositeUpper:.2};

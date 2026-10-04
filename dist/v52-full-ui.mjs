@@ -1,7 +1,17 @@
 import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,activeMotions,validateCriteria} from './v5-core.mjs';
 import {calibrateIRER,irerAuxiliary} from './motion-metrics.mjs';
 import {externalRotation} from './v5-core.mjs';
-import {templateStore} from './neutral.mjs';
+import {templateStore,validateCapture,postureFeatures} from './neutral.mjs';
+
+export function validateSettingsBackup(v){
+ if(v?.schema!=='shoulder-settings-1'||!Array.isArray(v.templates))throw Error('설정 백업 형식 오류');
+ validateCriteria(v.criteria);if(v.capture)validateCapture(v.capture);
+ const ids=new Set();for(const t of v.templates){
+  if(typeof t.id!=='string'||!t.id||ids.has(t.id)||!ACTIVE_MOTIONS.includes(t.motion)||!['left','right'].includes(t.arm)||!['정면','측면','후면'].includes(t.view)||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(t.image)||!postureFeatures(t.corrected,t.arm)||!t.features||!['shoulder','elbow','wristX','wristY'].every(k=>Number.isFinite(t.features[k]))||!(t.angleTolerance>0&&t.angleTolerance<=60&&t.positionTolerance>0&&t.positionTolerance<=1))throw Error('자세 기준 데이터 오류');ids.add(t.id);
+ }
+ if(v.selected&&Object.values(v.selected).some(id=>id&&!ids.has(id)))throw Error('선택 기준 버전이 백업에 없습니다.');
+ return v;
+}
 
 export function setupFullV52(api){
  const {state,session,patient,camera,queue,selectMotion,renderAll,showToast,recalculateCurrentRom,selectFrame,renderWorkflow}=api,$=s=>document.querySelector(s);
@@ -15,7 +25,7 @@ export function setupFullV52(api){
  function ensureIdle(){if(queue.running||state.cameraBusy||state.refining||state.view==='detail')throw Error('촬영·분석·상세 수정 완료 후 설정하세요.');}
  const notify=()=>document.dispatchEvent(new window.Event('v52-settings-changed'));
  function save(c,d,apply=false){ensureIdle();validateCriteria(c);validateDefaults(d);localStorage.setItem('shoulder:v5:criteria',JSON.stringify(c));localStorage.setItem('shoulder:v52:defaults',JSON.stringify(d));state.defaults=d;
-  if(!hasData()||apply){state.criteria=c;if(apply)for(const k of ACTIVE_MOTIONS){const item=state.sessions[k];item.measurementSettings={birMode:c.birMode,birDivisions:c.birDivisions};item.irerOptions=structuredClone(d.irer);}
+  if(!hasData()||apply){if(apply&&hasData()){state.criteriaHistory??=[];state.criteriaHistory.push({at:new Date().toISOString(),criteria:structuredClone(state.criteria),results:Object.fromEntries(ACTIVE_MOTIONS.map(k=>[k,structuredClone(state.sessions[k].rom)]))});}state.criteria=c;if(apply)for(const k of ACTIVE_MOTIONS){const item=state.sessions[k];item.measurementSettings={birMode:c.birMode,birDivisions:c.birDivisions};item.irerOptions=structuredClone(d.irer);item.measurementConfirmed=false;}
    notify();if(!activeMotions(c).includes(state.activeMotion))selectMotion(activeMotions(c)[0]);renderWorkflow();}
   $('#full-status').textContent=hasData()&&!apply?'기본값 저장됨 · 현재 검사 기준은 유지됩니다. 새 검사부터 적용하거나 재계산을 선택하세요.':'기본값 저장·적용 완료 · 임상 미검증 시험 기준';
  }
@@ -26,7 +36,13 @@ export function setupFullV52(api){
  $('#full-reapply').onclick=()=>{try{const c=validateCriteria(JSON.parse(localStorage.getItem('shoulder:v5:criteria'))||structuredClone(DEFAULT_CRITERIA));save(c,state.defaults,true);const prior=state.activeMotion;for(const k of activeMotions(c)){selectMotion(k);recalculateCurrentRom();}selectMotion(prior);renderAll();showToast('최신 기준으로 재계산했습니다. 저장하면 검사에 반영됩니다.');}catch(e){showToast(e.message);}};
  function download(name,value){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
  $('#full-export').onclick=async()=>{try{download('shoulder-v52-settings.json',{schema:'shoulder-settings-1',criteria:JSON.parse(localStorage.getItem('shoulder:v5:criteria'))??state.criteria,defaults:state.defaults,capture:JSON.parse(localStorage.getItem('shoulder:v52:capture')||'null'),camera:JSON.parse(localStorage.getItem('shoulder:camera')||'null'),selected:JSON.parse(localStorage.getItem('shoulder:v52:neutral-selection')||'{}'),templates:await templateStore('list')});}catch(e){showToast(e.message);}};
- $('#full-import').onchange=async e=>{try{const file=e.target.files?.[0];if(!file)return;if(file.size>30*1024*1024)throw Error('설정 백업은 30MB 이하로 선택하세요.');const v=JSON.parse(await file.text());if(v.schema!=='shoulder-settings-1')throw Error('설정 백업 형식 오류');validateCriteria(v.criteria);validateDefaults(v.defaults);ensureIdle();if(!Array.isArray(v.templates))throw Error('자세 기준 목록 오류');const existing=await templateStore('list');for(const t of v.templates){if(!ACTIVE_MOTIONS.includes(t.motion)||!['left','right'].includes(t.arm)||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(t.image)||!t.id||!t.features||!Object.values(t.features).every(Number.isFinite))throw Error('자세 기준 데이터 오류');}for(const t of v.templates)if(!existing.some(x=>x.id===t.id))await templateStore('save',t);save(v.criteria,v.defaults);if(v.capture)localStorage.setItem('shoulder:v52:capture',JSON.stringify(v.capture));if(v.camera)localStorage.setItem('shoulder:camera',JSON.stringify(v.camera));localStorage.setItem('shoulder:v52:neutral-selection',JSON.stringify(v.selected??{}));fields();showToast('복원 완료 · 카메라/자세 기준은 새로고침 후 적용됩니다.');}catch(error){showToast(error.message);}finally{e.target.value='';}};
+ $('#full-import').onchange=async e=>{try{
+  const file=e.target.files?.[0];if(!file)return;if(file.size>30*1024*1024)throw Error('설정 백업은 30MB 이하로 선택하세요.');
+  const v=validateSettingsBackup(JSON.parse(await file.text()));validateDefaults(v.defaults);ensureIdle();const existing=await templateStore('list');
+  for(const t of v.templates){const same=existing.find(x=>x.id===t.id);if(same&&JSON.stringify(same)!==JSON.stringify(t))throw Error('같은 기준 ID에 다른 내용이 있습니다. 기존 기준은 보존됩니다.');}
+  for(const t of v.templates)if(!existing.some(x=>x.id===t.id))await templateStore('save',t);
+  save(v.criteria,v.defaults);if(v.capture)localStorage.setItem('shoulder:v52:capture',JSON.stringify(v.capture));if(v.camera)localStorage.setItem('shoulder:camera',JSON.stringify(v.camera));localStorage.setItem('shoulder:v52:neutral-selection',JSON.stringify(v.selected??{}));fields();showToast('복원 완료 · 카메라/자세 기준은 새로고침 후 적용됩니다.');
+ }catch(error){showToast(error.message);}finally{e.target.value='';}};
  $('.correction-card .panel-actions').insertAdjacentHTML('beforebegin',`<section id="full-detail" class="v52-block"><div id="full-fe2" hidden><h3>FE2 양 극점</h3><label>몸 앞쪽 방향<select id="detail-facing"><option value="right">화면 오른쪽</option><option value="left">화면 왼쪽</option></select></label><div class="v5-actions"><button id="fe2-ext" class="button ghost">현재를 최대 신전으로</button><button id="fe2-flex" class="button ghost">현재를 최대 굴곡으로</button><button id="fe2-ext-go" class="button ghost">신전 프레임 보기</button><button id="fe2-flex-go" class="button ghost">굴곡 프레임 보기</button><button id="fe2-reset" class="button ghost">극점 자동값 복원</button></div><p id="fe2-info"></p></div><div id="full-irer" hidden><h3>IRER 개인 길이 보정</h3><p>전완이 영상면과 평행한 프레임을 선택하세요. 반대팔은 곧게 내립니다. 손목을 기본으로 사용합니다. 주먹 끝 사용 시 손끝 관절점을 주먹 끝 위치로 직접 수정하세요.</p><label>보정 기준<select id="irer-reference"><option value="wrist">손목</option><option value="fist">주먹 끝 (수동 지정)</option></select></label><button id="irer-calibrate" class="button ghost">현재 프레임으로 개인 길이 보정</button><button id="irer-clear" class="button ghost">개인 보정 해제</button><p id="irer-info"></p></div></section>`);
  function edited(message){const item=session();item.editHistory??=[];item.editHistory.push({at:new Date().toISOString(),action:message,sourceFrame:item.frames[state.currentIndex]?.sourceFrame});item.measurementConfirmed=false;recalculateCurrentRom();renderAll();}
  $('#detail-facing').onchange=()=>{session().facing=$('#detail-facing').value;session().fe2ExtensionFrame=null;session().fe2FlexionFrame=null;edited('FE2 방향 변경');};
@@ -42,7 +58,7 @@ export function setupFullV52(api){
   if(state.activeMotion==='IRER'){const f=item.frames[state.currentIndex],world=f?externalRotation(f.worldCorrected??f.worldRaw,patient().arm):null,aux=irerAuxiliary(f?.corrected,patient().arm,item.irerCalibration,world,item.irerOptions??state.defaults.irer);$('#irer-info').textContent=`3D ${world?.toFixed(1)??'—'}° / 길이 보조 ${aux.angle?.toFixed(1)??'—'}° / 차이 ${aux.difference?.toFixed(1)??'—'}° · ${aux.warnings.join(' / ')||'비교 가능'} · 추정점은 원본 관절점을 덮어쓰지 않습니다.`;}
   if(state.activeMotion==='BIR'&&state.criteria.birMode==='relative-t'){$('#bir-level').closest('label').hidden=true;$('#detail-a-label').textContent='손목 최대 도달 높이';$('#summary-max-label').textContent='손목 최대 도달 높이';$('#detail-a-meta').textContent='골반 t0 · 어깨 t'+(r?.divisions??state.criteria.birDivisions)+' · 손목 기준';}
  }
- function newExam(){state.examId=crypto.randomUUID();state.examCreatedAt=new Date().toISOString();try{state.criteria=validateCriteria(JSON.parse(localStorage.getItem('shoulder:v5:criteria'))??structuredClone(DEFAULT_CRITERIA));}catch{state.criteria=structuredClone(DEFAULT_CRITERIA);}const radio=$(`input[name="arm"][value="${state.defaults.arm}"]`);radio.checked=true;$('#frame-step').value=state.defaults.frameStep;notify();renderWorkflow();}
+ function newExam(){state.examId=crypto.randomUUID();state.examCreatedAt=new Date().toISOString();state.criteriaHistory=[];try{state.criteria=validateCriteria(JSON.parse(localStorage.getItem('shoulder:v5:criteria'))??structuredClone(DEFAULT_CRITERIA));}catch{state.criteria=structuredClone(DEFAULT_CRITERIA);}const radio=$(`input[name="arm"][value="${state.defaults.arm}"]`);radio.checked=true;$('#frame-step').value=state.defaults.frameStep;notify();renderWorkflow();selectMotion(activeMotions(state.criteria)[0]);}
  $('#new-patient').addEventListener('click',()=>{if(!hasData())newExam();});
  if(!hasData()){$(`input[name="arm"][value="${state.defaults.arm}"]`).checked=true;$('#frame-step').value=state.defaults.frameStep;}
  document.addEventListener('v5-render',render);document.addEventListener('v52-criteria',fields);

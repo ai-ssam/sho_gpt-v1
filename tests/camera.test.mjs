@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {JSDOM} from 'jsdom';
-import {setupCamera} from '../dist/camera.mjs';
+import {setupCamera,acquireCamera} from '../dist/camera.mjs';
+
+test('unsupported camera constraints fall back once; permission denial never retries',async()=>{
+ const calls=[],stream={};const media={getUserMedia:async options=>{calls.push(options);if(calls.length===1)throw Object.assign(Error('unsupported'),{name:'OverconstrainedError'});return stream;}};
+ const result=await acquireCamera(media,{deviceId:{exact:'removed-camera'}});assert.equal(result.stream,stream);assert.equal(result.fallback,true);assert.equal(calls.length,2);assert.equal(calls[1].audio,false);assert.equal(calls[1].video.height.ideal,720);
+ let count=0;await assert.rejects(acquireCamera({getUserMedia:async()=>{count++;throw Object.assign(Error('denied'),{name:'NotAllowedError'});}},{height:720}));assert.equal(count,1);
+});
 test('카메라 권한 실패 후 재연결·무음 촬영·원본 전달·장치 해제',async()=>{
   const dom=new JSDOM(await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),{url:'https://camera.test'}),w=dom.window;
   globalThis.document=w.document;globalThis.window=w;globalThis.localStorage=w.localStorage;globalThis.Option=w.Option;

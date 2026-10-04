@@ -1035,14 +1035,17 @@ function patientPayload() {
       snapshotSourceFrame: item.snapshotSourceFrame,
       cirManualStartFrame: item.cirManualStartFrame,
       cirManualEndFrame: item.cirManualEndFrame,
-      displayMeasuredArmOnly: false, hideOppositeArm: ["FE", "ER", "CIR"].includes(code)
+      displayMeasuredArmOnly: false, hideOppositeArm: ["FE2", "FE", "ER", "CIR"].includes(code)
     };
   }
   return {
     schemaVersion: "5.0", appVersion:"5.2.0",examId:state.examId,examCreatedAt:state.examCreatedAt,activeMotions:activeMotions(state.criteria), patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
-    privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
+    criteriaHistory:state.criteriaHistory??[],privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
   };
 }
+let savedExamSignature=null;
+function examSignature(){const data=patientPayload();delete data.updatedAt;return JSON.stringify(data);}
+function hasUnsavedExam(){return MOTIONS.some(code=>state.sessions[code].fileName)&&savedExamSignature!==examSignature();}
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -1476,6 +1479,7 @@ elements.savePatient.addEventListener("click", async () => {
       record.videos[code]=item.sourceFile;
     }}
     await dbPut(record);
+    savedExamSignature=examSignature();
     await refreshSavedPatientList(state.examId);
     renderResults();
     showToast("결과와 원본 영상을 이 PC 브라우저에 함께 저장했습니다.");
@@ -1503,6 +1507,7 @@ elements.loadPatient.addEventListener("click", async () => {
     elements.armInputs.forEach(input => { input.checked = input.value === record.patient.arm; });
     boundPatient=patient();
     state.criteria=record.criteria?validateCriteria(record.criteria):structuredClone(DEFAULT_CRITERIA);
+    state.criteriaHistory=record.criteriaHistory??[];
     state.examId=record.examId??crypto.randomUUID();state.examCreatedAt=record.examCreatedAt??record.updatedAt;
     state.legacyMeasurements=record.measurements?.CIR?{CIR:record.measurements.CIR}:{};
     state.sessions = Object.fromEntries(MOTIONS.map(code => {
@@ -1516,6 +1521,7 @@ elements.loadPatient.addEventListener("click", async () => {
     updatePatientGate();
     setView('results');
     selectMotion(firstWithData);
+    savedExamSignature=examSignature();
     showToast(`${record.patient.id} 환자 데이터를 불러왔습니다.`);
   } catch (error) { showToast(error.message); }
 });
@@ -1679,6 +1685,7 @@ $('#apply-detail').onclick=applyDetail;
 $('#save-final').onclick=()=>elements.savePatient.click();
 const camera=setupCamera({getContext:()=>({valid:patientValid(),motion:state.activeMotion,arm:patient().arm,patientId:patient().id,facing:state.defaults?.facing??'right'}),onBusy:value=>{state.cameraBusy=value;lockWorkspace(value);renderWorkflow();},onRecorded:async(file,settings,context)=>{if(context.patientId!==patient().id||context.motion!==state.activeMotion||context.arm!==patient().arm)throw Error('촬영 당시 환자/동작과 다릅니다. 촬영 원본 저장 후 올바른 측정에 업로드하세요.');await loadVideoFile(file,settings);},toast:showToast});
 window.addEventListener("resize", resizeOverlay);
+window.addEventListener('beforeunload',event=>{if(state.cameraBusy||queue.running||state.draft||hasUnsavedExam()){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',event=>{
   // A cached page can return with its original DOM/state. Revoking blob URLs
   // here previously destroyed its video connections on return.

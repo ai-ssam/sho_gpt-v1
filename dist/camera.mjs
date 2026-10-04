@@ -5,6 +5,11 @@ import {templatePose,DEFAULT_CAPTURE} from './neutral.mjs';
 export function cameraError(error) {
   return ({NotAllowedError:'카메라 권한이 거부되었습니다. 주소창의 사이트 권한에서 카메라를 허용한 뒤 다시 연결하세요.',NotFoundError:'연결된 카메라가 없습니다. USB 카메라 연결을 확인하세요.',NotReadableError:'카메라를 사용할 수 없습니다. 다른 촬영 앱을 종료한 뒤 다시 시도하세요.',OverconstrainedError:'요청한 해상도 또는 카메라를 지원하지 않습니다. 720p / 30 FPS로 변경하세요.',SecurityError:'보안 연결(HTTPS)에서 카메라를 사용할 수 있습니다.'})[error?.name]||error?.message||'카메라 연결에 실패했습니다.';
 }
+export async function acquireCamera(mediaDevices,video){
+  try{return {stream:await mediaDevices.getUserMedia({audio:false,video}),fallback:false};}
+  catch(error){if(error.name!=='OverconstrainedError')throw error;
+    return {stream:await mediaDevices.getUserMedia({audio:false,video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}}),fallback:true};}
+}
 export function setupCamera({getContext,onRecorded,onBusy,toast}) {
   const $=s=>document.querySelector(s),root=$('#camera-panel'),preview=$('#camera-preview'),status=$('#camera-status');
   let stream=null,recorder=null,chunks=[],countdown=null,timer=null,started=0,generation=0,captureContext=null,lastFile=null,lastUrl=null,settings=null;
@@ -41,12 +46,14 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
     }catch(error){const hint=$('#v5-pose-state');if(hint)hint.textContent='자동 감지 실패 · 수동 촬영을 이용하세요. '+error.message;live.reset();if($('#v5-auto'))$('#v5-auto').checked=false;}
     finally{liveRunning=false;if(stream)liveTimer=setTimeout(watch,200);}
   }
-  const preferences=()=>({resolution:$('#camera-resolution').value,fps:$('#camera-fps').value,facing:$('#camera-facing').value,mirror:$('#camera-mirror').checked,countdown:$('#camera-countdown').value});
+  let preferredDevice='';
+  const preferences=()=>({device:preferredDevice,resolution:$('#camera-resolution').value,fps:$('#camera-fps').value,facing:$('#camera-facing').value,mirror:$('#camera-mirror').checked,countdown:$('#camera-countdown').value});
   try {const saved=JSON.parse(localStorage.getItem('shoulder:camera')||'{}');for(const key of ['resolution','fps','facing','countdown'])if(saved[key])$('#camera-'+key).value=saved[key];$('#camera-mirror').checked=!!saved.mirror;}catch{}
   function persist(){try{localStorage.setItem('shoulder:camera',JSON.stringify(preferences()));}catch{}preview.style.transform=$('#camera-mirror').checked?'scaleX(-1)':'';}
+  try{preferredDevice=JSON.parse(localStorage.getItem('shoulder:camera')||'{}').device||'';}catch{}
   persist();
   function busy(value){onBusy(value);$('#camera-connect').disabled=value;for(const id of ['device','resolution','fps','facing','countdown'])$('#camera-'+id).disabled=value;$('#camera-record').disabled=value||!stream;$('#camera-stop').disabled=!value;}
-  async function devices(){if(!navigator.mediaDevices?.enumerateDevices)return;const list=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');const current=$('#camera-device').value;$('#camera-device').replaceChildren(new Option('기본 카메라',''),...list.map((d,i)=>new Option(d.label||`카메라 ${i+1}`,d.deviceId)));if(list.some(d=>d.deviceId===current))$('#camera-device').value=current;}
+  async function devices(){if(!navigator.mediaDevices?.enumerateDevices)return;const list=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');const current=$('#camera-device').value||preferredDevice;$('#camera-device').replaceChildren(new Option('기본 카메라',''),...list.map((d,i)=>new Option(d.label||`카메라 ${i+1}`,d.deviceId)));if(list.some(d=>d.deviceId===current))$('#camera-device').value=current;}
   function release(){generation++;clearTimeout(liveTimer);live.reset();auto.reset();clearInterval(countdown);clearInterval(timer);countdown=null;stream?.getTracks().forEach(t=>t.stop());stream=null;preview.srcObject=null;$('#camera-record').disabled=true;$('#camera-disconnect').disabled=true;}
   async function connect(){
     if(!getContext().valid){toast('환자정보와 측정 팔을 먼저 선택하세요.');return;}
@@ -54,10 +61,10 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
     release();const token=++generation;$('#camera-connect').disabled=true;status.textContent='카메라 권한 및 장치를 확인하는 중…';persist();
     try {
       const height=Number($('#camera-resolution').value),device=$('#camera-device').value;
-      const acquired=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:height*16/9},height:{ideal:height},frameRate:{ideal:Number($('#camera-fps').value)},...(device?{deviceId:{exact:device}}:{facingMode:{ideal:$('#camera-facing').value}})}});
+      const result=await acquireCamera(navigator.mediaDevices,{width:{ideal:height*16/9},height:{ideal:height},frameRate:{ideal:Number($('#camera-fps').value)},...(device?{deviceId:{exact:device}}:{facingMode:{ideal:$('#camera-facing').value}})}),acquired=result.stream;
       if(token!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
       stream=acquired;preview.srcObject=stream;await preview.play();settings=stream.getVideoTracks()[0].getSettings();await devices();
-      status.textContent=`연결됨 · ${settings.width}×${settings.height} · 실제 ${Number(settings.frameRate||0).toFixed(2)} FPS · 음성 녹음 없음`;
+      status.textContent=`${result.fallback?'선택 설정 미지원 · 기본 카메라 720p/30 FPS로 대체 · ':''}연결됨 · ${settings.width}×${settings.height} · 실제 ${Number(settings.frameRate||0).toFixed(2)} FPS · 음성 녹음 없음`;
       $('#camera-record').disabled=false;$('#camera-disconnect').disabled=false;
       auto.reset();void watch();
       stream.getVideoTracks()[0].addEventListener('ended',()=>{stop();release();status.textContent='카메라 연결이 끊겼습니다. 촬영 결과를 확인하고 재연결하세요.';},{once:true});
@@ -99,6 +106,8 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
   $('#camera-download').onclick=()=>{if(lastUrl){const a=document.createElement('a');a.href=lastUrl;a.download=lastFile.name;a.click();}};
   for(const input of root.querySelectorAll('select,input'))input.addEventListener('change',()=>{persist();if(stream&&!recorder?.state?.includes('recording'))status.textContent='설정을 변경했습니다. 카메라 연결을 다시 눌러 적용하세요.';});
   navigator.mediaDevices?.addEventListener?.('devicechange',()=>devices().catch(()=>{}));
+  $('#camera-device').addEventListener('change',()=>{preferredDevice=$('#camera-device').value;persist();});
+  void devices().catch(()=>{});
   window.addEventListener('pagehide',()=>{stop();release();if(lastUrl)URL.revokeObjectURL(lastUrl);});
   return {release,stop:()=>{stop();release();},isRecording:()=>!!countdown||recorder?.state==='recording',configure:(options,template)=>{if(recorder?.state==='recording'||countdown)throw Error('촬영 후 설정을 변경하세요.');auto.configure(options);captureSettings={...options};neutralTemplate=template?structuredClone(template):null;}};
 }

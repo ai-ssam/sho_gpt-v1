@@ -19,6 +19,14 @@ import {trackedHandPoint} from '../dist/analysis.mjs';
 import {makeTemplate,templatePose,validateCapture,templateStore} from '../dist/neutral.mjs';
 import {indexedDB} from 'fake-indexeddb';
 import {signedElevation,fe2Metrics,birHeight,calibrateIRER,irerAuxiliary} from '../dist/motion-metrics.mjs';
+import {validateSettingsBackup} from '../dist/v52-full-ui.mjs';
+
+test('settings restore rejects invalid capture duration and missing template references before writing',()=>{
+ const backup={schema:'shoulder-settings-1',criteria:structuredClone(DEFAULT_CRITERIA),templates:[],selected:{},capture:{startSeconds:1.5,returnSeconds:1.2}};
+ assert.equal(validateSettingsBackup(backup),backup);
+ assert.throws(()=>validateSettingsBackup({...backup,capture:{startSeconds:-1,returnSeconds:1}}),/유지시간/);
+ assert.throws(()=>validateSettingsBackup({...backup,selected:{'AB:right':'absent'}}),/버전/);
+});
 
 function sidePoints(angle,arm='right',facing='right'){
  const p=(x,y)=>({x,y,visibility:1,aspectRatio:1}),r=angle*Math.PI/180;
@@ -108,6 +116,7 @@ test('score boundaries and missing/confirmation gates',()=>{
  sessions.AB.rom.maxAngle=120;assert.equal(evaluate(sessions).rows[0].score,1);
  sessions.IRER.measurementConfirmed=false;assert.equal(evaluate(sessions).total,null);
  sessions.IRER.measurementConfirmed=true;sessions.BIR.rom.tRaw=null;assert.equal(evaluate(sessions).total,null);
+  sessions.BIR.rom.tRaw=10;sessions.IRER.irerCalibration={id:'test'};sessions.IRER.rom.auxiliary={quality:'확인 필요'};assert.equal(evaluate(sessions).total,null);sessions.IRER.rom.auxiliary.quality='비교 가능';assert.notEqual(evaluate(sessions).total,null);
  const c=structuredClone(DEFAULT_CRITERIA);c.weights.AB=99;assert.throws(()=>validateCriteria(c));
 });
 test('refinement preserves edits and orders source frames',()=>{

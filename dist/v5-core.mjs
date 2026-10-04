@@ -24,6 +24,7 @@ export function evaluate(sessions,c=DEFAULT_CRITERIA){
   else if(code==='BIR'&&c.birMode!=='relative-t'){value=s.birManualSpineLevel;if(!value)reason='척추 수준 확인 필요';else{score=c.bir.findIndex(a=>a.includes(value));if(score<0){score=null;reason='미등록 척추 수준';}}}
   else if(code==='BIR'){value=r.tRaw;if(r.divisions!==c.birDivisions)reason='BIR 분할 수 변경 · 재계산 필요';else if(Number.isFinite(value))score=c.thresholds.BIR.filter(t=>value<t).length;else reason='t구간 재분석 필요';}
   else if(code==='IRER'&&!s.measurementConfirmed)reason='3D 추정값 확인 필요';
+  else if(code==='IRER'&&s.irerCalibration&&r.auxiliary?.quality!=='비교 가능')reason='IRER 보정 품질 확인 필요';
   else{value=code==='FE2'?r.rom:code==='CIR'?r.circularity:r.maxAngle;if(Number.isFinite(value)&&value>=0&&value<=(code==='FE2'?360:180))score=c.thresholds[code].filter(t=>value<t).length;else reason='유효 측정값 없음';}
   return {code,value,score,reason,weight:c.weights[code]};
  });
