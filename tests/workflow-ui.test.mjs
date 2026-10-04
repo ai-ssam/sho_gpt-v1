@@ -94,7 +94,10 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   assert.throws(()=>app.validateImport(invalid),/보정/);
   assert.equal($('#v52-view').value,'정면');$('#v52-motion').value='FE2';$('#v52-motion').dispatchEvent(new w.Event('change'));assert.equal($('#v52-view').value,'측면');
   assert.deepEqual([...w.document.querySelectorAll('.motion-card')].filter(x=>!x.hidden).map(x=>x.dataset.motion),['AB','FE2','BIR','IRER']);
-  assert.equal(w.document.querySelectorAll('[role="tab"]').length,5);$('#admin-tab-camera').click();assert.equal($('#admin-panel-camera').hidden,false);assert.equal($('#admin-panel-basic').hidden,true);assert.equal($('#camera-device').closest('[role="tabpanel"]').id,'admin-panel-camera');
+  assert.equal(w.document.querySelectorAll('[role="tab"]').length,4);assert.equal($('#admin-tab-basic').textContent,'동작·평가기준');assert.equal($('#v5-criteria-rows').closest('[role="tabpanel"]').id,'admin-panel-basic');assert.equal($('#v5-criteria-rows').querySelectorAll('[data-enabled]').length,7);assert.equal($('#full-motions').hidden,true);
+  const feEnabled=$('#v5-criteria-rows [data-enabled="FE"]');feEnabled.checked=true;feEnabled.dispatchEvent(new w.Event('change'));assert.equal($('#full-motions [data-motion="FE"]').checked,true);feEnabled.checked=false;feEnabled.dispatchEvent(new w.Event('change'));
+  const abThreshold=$('#v5-criteria-rows [data-code="AB"][data-field="t0"]');abThreshold.value='151';abThreshold.dispatchEvent(new w.Event('input'));$('#v5-settings-save').click();assert.equal(app.state.criteria.thresholds.AB[0],151);assert.match($('#v5-settings-state').textContent,/적용 완료/);
+  $('#admin-tab-camera').click();assert.equal($('#admin-panel-camera').hidden,false);assert.equal($('#admin-panel-basic').hidden,true);assert.equal($('#camera-device').closest('[role="tabpanel"]').id,'admin-panel-camera');
   app.state.sessions.AB.snapshot='data:image/jpeg;base64,AAAA';app.setView('results');app.renderAll();assert.equal(w.document.querySelector('.final-representative').src,'data:image/jpeg;base64,AAAA');
   app.state.sessions.FE.videoUrl='blob:keep-on-back';
   const hide=new w.Event('pagehide');Object.defineProperty(hide,'persisted',{value:true});w.dispatchEvent(hide);

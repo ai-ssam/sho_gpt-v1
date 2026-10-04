@@ -2,7 +2,7 @@ import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,activeMotions,validateCriteria} from './
 import {calibrateIRER,irerAuxiliary} from './motion-metrics.mjs';
 import {externalRotation} from './v5-core.mjs';
 import {templateStore,validateCapture,postureFeatures} from './neutral.mjs';
-import {setupAdminTabs} from './admin-tabs.mjs';
+import {setupAdminTabs} from './admin-tabs.mjs?v=5.2.0-admin3';
 
 export function validateSettingsBackup(v){
  if(v?.schema!=='shoulder-settings-1'||!Array.isArray(v.templates))throw Error('설정 백업 형식 오류');
@@ -23,6 +23,17 @@ export function setupFullV52(api){
  for(const k of ACTIVE_MOTIONS){const label=document.createElement('label'),check=document.createElement('input'),weight=document.createElement('input');check.type='checkbox';check.dataset.motion=k;weight.type='number';weight.min=0;weight.step='.01';weight.dataset.weight=k;weight.setAttribute('aria-label',k+' 활성 가중치');label.append(check,document.createTextNode(k),weight);$('#full-motions').append(label);}
  function fields(){for(const input of $('#full-motions').querySelectorAll('[data-motion]'))input.checked=activeMotions(state.criteria).includes(input.dataset.motion);for(const input of $('#full-motions').querySelectorAll('[data-weight]'))input.value=state.criteria.weights[input.dataset.weight]??0;$('#full-bir').value=state.criteria.birDivisions??10;$('#full-arm').value=state.defaults.arm;$('#full-step').value=state.defaults.frameStep;$('#full-facing').value=state.defaults.facing;$('#full-difference').value=state.defaults.irer.maxDifference;$('#full-scale').value=state.defaults.irer.scaleTolerance;}
  const hasData=()=>ACTIVE_MOTIONS.some(k=>state.sessions[k]?.fileName);
+ function unifiedRows(){
+  for(const row of $('#v5-criteria-rows').children){const code=row.querySelector('th').textContent;
+   let check=row.querySelector('[data-enabled]');if(!check){const cell=document.createElement('td');cell.className='motion-enable-cell';check=document.createElement('input');check.type='checkbox';check.dataset.enabled=code;check.setAttribute('aria-label',code+' 사용');cell.append(check);row.prepend(cell);}
+   check.checked=activeMotions(state.criteria).includes(code);row.classList.toggle('motion-disabled',!check.checked);check.onchange=()=>{$('#full-motions [data-motion="'+code+'"]').checked=check.checked;row.classList.toggle('motion-disabled',!check.checked);};
+   const weight=row.querySelector('[data-field="weight"]');weight.value=$('#full-motions [data-weight="'+code+'"]').value;weight.oninput=()=>{$('#full-motions [data-weight="'+code+'"]').value=weight.value;};
+   for(const input of row.querySelectorAll('[data-field^="t"]')){input.value=state.criteria.thresholds[code][Number(input.dataset.field[1])];delete input.dataset.edited;input.oninput=()=>input.dataset.edited='true';}
+  }
+  const header=$('#v5-criteria-rows').closest('table').querySelector('thead tr');if(header.children.length===5){const cell=document.createElement('th');cell.textContent='사용';cell.className='motion-enable-cell';header.prepend(cell);}
+ }
+ document.addEventListener('v52-rows-ready',unifiedRows);
+ $('#full-equal').addEventListener('click',()=>{for(const input of $('#v5-criteria-rows').querySelectorAll('[data-field="weight"]'))input.value=$('#full-motions [data-weight="'+input.dataset.code+'"]').value;});
  function ensureIdle(){if(queue.running||state.cameraBusy||state.refining||state.view==='detail')throw Error('촬영·분석·상세 수정 완료 후 설정하세요.');}
  const notify=()=>document.dispatchEvent(new window.Event('v52-settings-changed'));
  function save(c,d,apply=false){ensureIdle();validateCriteria(c);validateDefaults(d);localStorage.setItem('shoulder:v5:criteria',JSON.stringify(c));localStorage.setItem('shoulder:v52:defaults',JSON.stringify(d));state.defaults=d;
@@ -32,10 +43,10 @@ export function setupFullV52(api){
    notify();if(!activeMotions(c).includes(state.activeMotion))selectMotion(activeMotions(c)[0]);renderWorkflow();}
   $('#full-status').textContent=hasData()&&!apply?'기본값 저장됨 · 현재 검사 기준은 유지됩니다. 새 검사부터 적용하거나 재계산을 선택하세요.':'기본값 저장·적용 완료 · 임상 미검증 시험 기준';
  }
- function read(){const c=structuredClone(state.criteria),d=validateDefaults({arm:$('#full-arm').value,frameStep:Number($('#full-step').value),facing:$('#full-facing').value,irer:{maxDifference:Number($('#full-difference').value),scaleTolerance:Number($('#full-scale').value)}});c.activeMotions=[...$('#full-motions').querySelectorAll('[data-motion]:checked')].map(x=>x.dataset.motion);for(const input of $('#full-motions').querySelectorAll('[data-weight]')){if(input.value==='')throw Error('가중치를 입력하세요.');c.weights[input.dataset.weight]=Number(input.value);}c.thresholds={...structuredClone(DEFAULT_CRITERIA.thresholds),...c.thresholds};const n=Number($('#full-bir').value),old=c.birDivisions??10;c.thresholds.BIR=(c.birMode==='relative-t'?c.thresholds.BIR:DEFAULT_CRITERIA.thresholds.BIR).map(v=>v*n/old);c.birDivisions=n;c.birMode='relative-t';c.version='pc-full-'+new Date().toISOString();return {c:validateCriteria(c),d};}
- $('#full-save').onclick=()=>{try{const {c,d}=read();save(c,d,true);const prior=state.activeMotion;for(const k of activeMotions(c)){selectMotion(k);recalculateCurrentRom();}selectMotion(prior);renderAll();$('#full-status').textContent='설정 저장·현재 검사 적용 완료. 분석 간격 변경은 다음 분석·재분석부터 적용됩니다. 저장된 과거 검사는 유지됩니다.';}catch(e){$('#full-status').textContent=e.message;}};
+ function read(){const c=structuredClone(state.criteria),d=validateDefaults({arm:$('#full-arm').value,frameStep:Number($('#full-step').value),facing:$('#full-facing').value,irer:{maxDifference:Number($('#full-difference').value),scaleTolerance:Number($('#full-scale').value)}});c.activeMotions=[...$('#full-motions').querySelectorAll('[data-motion]:checked')].map(x=>x.dataset.motion);for(const input of $('#full-motions').querySelectorAll('[data-weight]')){if(input.value==='')throw Error('가중치를 입력하세요.');c.weights[input.dataset.weight]=Number(input.value);}c.thresholds={...structuredClone(DEFAULT_CRITERIA.thresholds),...c.thresholds};for(const input of $('#v5-criteria-rows').querySelectorAll('[data-field^="t"]')){if(!input.value.trim())throw Error('점수 경계를 입력하세요.');c.thresholds[input.dataset.code][Number(input.dataset.field[1])]=Number(input.value);}const n=Number($('#full-bir').value),old=c.birDivisions??10;if(!$('#v5-criteria-rows').querySelector('[data-code="BIR"][data-edited]'))c.thresholds.BIR=(c.birMode==='relative-t'?c.thresholds.BIR:DEFAULT_CRITERIA.thresholds.BIR).map(v=>v*n/old);c.birDivisions=n;c.birMode='relative-t';c.version='pc-full-'+new Date().toISOString();return {c:validateCriteria(c),d};}
+ $('#full-save').onclick=()=>{try{const {c,d}=read();save(c,d,true);const prior=state.activeMotion;for(const k of activeMotions(c)){selectMotion(k);recalculateCurrentRom();}selectMotion(prior);renderAll();unifiedRows();$('#full-status').textContent='설정 저장·현재 검사 적용 완료. 분석 간격 변경은 다음 분석·재분석부터 적용됩니다. 저장된 과거 검사는 유지됩니다.';}catch(e){$('#full-status').textContent=e.message;}};
  $('#full-equal').onclick=()=>{const codes=[...$('#full-motions').querySelectorAll('[data-motion]:checked')].map(x=>x.dataset.motion);for(const input of $('#full-motions').querySelectorAll('[data-weight]'))input.value=codes.includes(input.dataset.weight)?(codes.indexOf(input.dataset.weight)===codes.length-1?100-Math.floor(10000/codes.length)/100*(codes.length-1):Math.floor(10000/codes.length)/100):0;};
- $('#full-reset').onclick=()=>{try{save(structuredClone(DEFAULT_CRITERIA),structuredClone(defaults));fields();}catch(e){showToast(e.message);}};
+ $('#full-reset').onclick=()=>{try{save(structuredClone(DEFAULT_CRITERIA),structuredClone(defaults),true);fields();unifiedRows();renderAll();}catch(e){showToast(e.message);}};
  $('#full-reapply').onclick=()=>{try{const c=validateCriteria(JSON.parse(localStorage.getItem('shoulder:v5:criteria'))||structuredClone(DEFAULT_CRITERIA));save(c,state.defaults,true);const prior=state.activeMotion;for(const k of activeMotions(c)){selectMotion(k);recalculateCurrentRom();}selectMotion(prior);renderAll();showToast('최신 기준으로 재계산했습니다. 저장하면 검사에 반영됩니다.');}catch(e){showToast(e.message);}};
  function download(name,value){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
  $('#full-export').onclick=async()=>{try{download('shoulder-v52-settings.json',{schema:'shoulder-settings-1',criteria:JSON.parse(localStorage.getItem('shoulder:v5:criteria'))??state.criteria,defaults:state.defaults,capture:JSON.parse(localStorage.getItem('shoulder:v52:capture')||'null'),camera:JSON.parse(localStorage.getItem('shoulder:camera')||'null'),selected:JSON.parse(localStorage.getItem('shoulder:v52:neutral-selection')||'{}'),templates:await templateStore('list')});}catch(e){showToast(e.message);}};
@@ -69,4 +80,5 @@ export function setupFullV52(api){
  const grid=$('.motion-grid');for(const code of ACTIVE_MOTIONS){const card=grid.querySelector(`[data-motion="${code}"]`);if(card)grid.append(card);}
  fields();render();
  setupAdminTabs(settings);
+ unifiedRows();
 }

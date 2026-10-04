@@ -35,12 +35,12 @@ export function setupV5(api){
  function settingsRows(){
   document.dispatchEvent(new window.Event('v52-criteria'));
   const body=$('#v5-criteria-rows');body.replaceChildren();
-  for(const k of activeMotions(state.criteria)){
+  for(const k of ACTIVE_MOTIONS){
    const row=document.createElement('tr'),name=document.createElement('th');name.textContent=k;row.append(name);
    for(const [field,value]of [['weight',state.criteria.weights[k]],...(k==='BIR'&&state.criteria.birMode!=='relative-t'?[]:state.criteria.thresholds[k].map((v,i)=>['t'+i,v]))]){
     const cell=document.createElement('td'),input=document.createElement('input');input.type='number';if(k!=='BIR'||field==='weight')input.min='0';input.step='.1';input.value=value;input.dataset.code=k;input.dataset.field=field;input.setAttribute('aria-label',k+' '+field);cell.append(input);row.append(cell);
    }body.append(row);
-  }$('#v5-bir').value=state.criteria.bir.map(a=>a.join('|')).join('\n');$('#v5-bir').closest('label').hidden=state.criteria.birMode==='relative-t';
+  }$('#v5-bir').value=state.criteria.bir.map(a=>a.join('|')).join('\n');$('#v5-bir').closest('label').hidden=state.criteria.birMode==='relative-t';document.dispatchEvent(new window.Event('v52-rows-ready'));
  }
  function saveCriteria(c){
   if(refining||state.cameraBusy||state.view==='detail')throw Error('촬영·편집을 완료한 뒤 기준을 변경하세요.');

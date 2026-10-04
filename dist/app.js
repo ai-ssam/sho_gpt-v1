@@ -6,8 +6,8 @@ import {
 import {ACTIVE_MOTIONS, activeMotions, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs?v=5.2.0-fix2';
 import {signedElevation} from './motion-metrics.mjs';
 import {drawMeasurementSector} from './angle-sector.mjs';
-import {setupFullV52} from './v52-full-ui.mjs?v=5.2.0-fix2';
-import {setupV5} from './v5-ui.mjs';
+import {setupFullV52} from './v52-full-ui.mjs?v=5.2.0-admin3';
+import {setupV5} from './v5-ui.mjs?v=5.2.0-admin3';
 import {setupV52} from './v52-ui.mjs';
 import { setupCamera } from './camera.mjs';
 import { seekDecodedFrame, inspectVideo } from './media.mjs?v=5.0.0';
