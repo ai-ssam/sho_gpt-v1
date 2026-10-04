@@ -10,3 +10,4 @@ body[data-mode="camera"][data-view="capture"] .workspace-grid{display:none}
 .motion-card[hidden]{display:none!important}
 #full-motions input[type="checkbox"]{min-width:0;width:20px;height:20px}
 .v52-endpoints{display:flex;gap:12px;flex-wrap:wrap}.v52-endpoints img{width:180px;max-width:100%;border-radius:8px}
+.admin-tabs{display:flex;gap:8px;overflow-x:auto;border-bottom:1px solid #d7e2e8;margin:20px 0}.admin-tabs button{flex-shrink:0;border:0;background:transparent;padding:14px 20px;cursor:pointer;font-weight:700;color:#526575;border-bottom:3px solid transparent}.admin-tabs button[aria-selected="true"]{color:#176955;border-bottom-color:#176955;background:#eaf5f0}.admin-tab-panel[hidden]{display:none!important}.final-representative{width:100%;height:auto;object-fit:contain;border-radius:10px}.final-summary{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}

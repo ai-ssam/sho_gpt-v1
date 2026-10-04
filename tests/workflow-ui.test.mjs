@@ -28,7 +28,7 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   w.document.querySelector('#final-analysis').click();assert.equal(w.document.body.dataset.view,'results');assert.equal(w.document.querySelectorAll('.final-motion').length,4);
   const original=structuredClone(app.state.sessions.FE);
   app.openDetail('FE');assert.equal(w.document.body.dataset.view,'detail');assert.notEqual(app.session(),app.state.sessions.FE);
-  const landmarks=w.document.querySelector('#landmark-list').textContent;assert.match(landmarks,/왼쪽 골반/);assert.doesNotMatch(landmarks,/왼쪽 팔꿈치/);assert.match(landmarks,/오른쪽 팔꿈치/);
+  const landmarks=w.document.querySelector('#landmark-list').textContent;assert.doesNotMatch(landmarks,/왼쪽 골반/);assert.doesNotMatch(landmarks,/왼쪽 팔꿈치/);assert.match(landmarks,/오른쪽 팔꿈치/);
   app.session().frames[0].corrected.right_elbow.x=.12;
   assert.deepEqual(app.state.sessions.FE,original,'수정 중에는 최종값을 변경하지 않음');
   w.document.querySelector('#discard-detail').click();assert.equal(w.document.body.dataset.view,'results');assert.deepEqual(app.state.sessions.FE,original);
@@ -79,20 +79,23 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   $('#v52-use-neutral').click();assert.match($('#v52-neutral-status').textContent,/기준 선택 적용됨/);
   const {templateStore}=await import('../dist/neutral.mjs');const templates=await templateStore('list');assert.equal(templates.length,1);assert.equal(templates[0].source.kind,'upload');assert.equal(templates[0].corrected.right_wrist.x,.51);assert.equal(templates[0].raw.right_wrist.x,.5);
   $('#v52-admin-close').click();assert.equal(w.document.body.dataset.admin,'false');
-  // PC defaults must not silently rewrite the active exam's measurement policy.
+  // Explicit admin save applies to the current exam; previous policy is audited.
   const priorCriteria=structuredClone(app.state.criteria);
   $('#full-bir').value='20';$('#full-step').value='5';$('#full-arm').value='left';$('#full-save').click();
-  assert.deepEqual(app.state.criteria,priorCriteria);
+  assert.equal(app.state.criteria.birDivisions,20);assert.deepEqual(app.state.criteriaHistory.at(-1).criteria,priorCriteria);
   assert.equal(JSON.parse(localStorage.getItem('shoulder:v5:criteria')).birDivisions,20);
   assert.equal(app.state.defaults.frameStep,5);
-  assert.equal(app.patientPayload().criteria.birDivisions,10);
-  $('#full-reapply').click();assert.equal(app.state.criteria.birDivisions,20);assert.equal(app.patientPayload().criteriaHistory.at(-1).criteria.birDivisions,10);assert.equal(app.state.sessions.BIR.measurementSettings.birDivisions,20);assert.equal(app.state.sessions.IRER.measurementConfirmed,false);
+  assert.ok(Object.values(app.state.sessions).every(item=>item.frameStep===5));app.selectMotion('BIR');assert.equal($('#frame-step').value,'5');
+  assert.equal(app.patientPayload().criteria.birDivisions,20);
+  $('#full-reapply').click();assert.equal(app.state.criteria.birDivisions,20);assert.equal(app.patientPayload().criteriaHistory.at(0).criteria.birDivisions,10);assert.equal(app.state.sessions.BIR.measurementSettings.birDivisions,20);assert.equal(app.state.sessions.IRER.measurementConfirmed,false);
   const invalid=structuredClone(app.patientPayload());invalid.measurements.FE2.fe2ExtensionFrame=999;
   assert.throws(()=>app.validateImport(invalid),/극점/);
   invalid.measurements.FE2.fe2ExtensionFrame=null;invalid.measurements.IRER.irerCalibration={arm:'right',reference:'wrist',forearm:-1,oppositeUpper:.2};
   assert.throws(()=>app.validateImport(invalid),/보정/);
   assert.equal($('#v52-view').value,'정면');$('#v52-motion').value='FE2';$('#v52-motion').dispatchEvent(new w.Event('change'));assert.equal($('#v52-view').value,'측면');
   assert.deepEqual([...w.document.querySelectorAll('.motion-card')].filter(x=>!x.hidden).map(x=>x.dataset.motion),['AB','FE2','BIR','IRER']);
+  assert.equal(w.document.querySelectorAll('[role="tab"]').length,5);$('#admin-tab-camera').click();assert.equal($('#admin-panel-camera').hidden,false);assert.equal($('#admin-panel-basic').hidden,true);assert.equal($('#camera-device').closest('[role="tabpanel"]').id,'admin-panel-camera');
+  app.state.sessions.AB.snapshot='data:image/jpeg;base64,AAAA';app.setView('results');app.renderAll();assert.equal(w.document.querySelector('.final-representative').src,'data:image/jpeg;base64,AAAA');
   app.state.sessions.FE.videoUrl='blob:keep-on-back';
   const hide=new w.Event('pagehide');Object.defineProperty(hide,'persisted',{value:true});w.dispatchEvent(hide);
   assert.equal(app.state.sessions.FE.videoUrl,'blob:keep-on-back','뒤로가기 캐시 복귀 시 영상 연결 유지');

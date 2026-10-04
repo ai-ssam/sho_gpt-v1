@@ -2,10 +2,11 @@ import {
   LANDMARKS, POSE_LANDMARKS, CONNECTIONS, MOTION_DEFINITIONS, analyzeRom, buildFrameTargets, clonePoints,
   editedPointIds, elbowAngles, frameRecord, framesToCsv, nextMonotonicTimestamp, shoulderAngles, summarize,
   templatePoints, trackedHandPoint, resolveRepresentativeFrame, validateAnalysis, usable, visiblePointIds, cirTrack, auditFields
-} from "./analysis.mjs";
-import {ACTIVE_MOTIONS, activeMotions, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs';
+} from "./analysis.mjs?v=5.2.0-fix2";
+import {ACTIVE_MOTIONS, activeMotions, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs?v=5.2.0-fix2';
 import {signedElevation} from './motion-metrics.mjs';
-import {setupFullV52} from './v52-full-ui.mjs';
+import {drawMeasurementSector} from './angle-sector.mjs';
+import {setupFullV52} from './v52-full-ui.mjs?v=5.2.0-fix2';
 import {setupV5} from './v5-ui.mjs';
 import {setupV52} from './v52-ui.mjs';
 import { setupCamera } from './camera.mjs';
@@ -595,6 +596,7 @@ function captureSnapshot(frame, rom, options={}) {
   if (item.videoUrl && video.readyState >= 2) imageCtx.drawImage(video, 0, 0, width, height);
   else { imageCtx.fillStyle = "#101614"; imageCtx.fillRect(0, 0, width, height); }
   if(!options.item)drawCirTrajectory(imageCtx, width, height);
+  drawMeasurementSector(imageCtx,width,height,frame,arm,code,code==='IRER'?externalRotation(frame.worldCorrected??frame.worldRaw,arm):null);
   drawSkeleton(imageCtx, width, height, frame,null,arm,code);
   imageCtx.fillStyle = "rgba(7,19,15,.78)";
   imageCtx.fillRect(14, 14, Math.min(width - 28, 370), 58);
@@ -604,9 +606,10 @@ function captureSnapshot(frame, rom, options={}) {
   imageCtx.fillStyle = "#dbe8e3";
   imageCtx.font = "12px system-ui";
   const mode = item.representativeSelectionType === "manual" ? "수동 대표" : "자동 대표";
-  const angle=frameAngles(frame)[arm];
+  const angle=code==='FE2'?signedElevation(frame.corrected,arm,item.facing??state.defaults?.facing):code==='BIR'?elbowAngles(frame.corrected)[arm]:code==='IRER'?externalRotation(frame.worldCorrected??frame.worldRaw,arm):shoulderAngles(frame.corrected)[arm];
   imageCtx.fillText(`원본 #${(frame.sourceFrame ?? frame.index) + 1} · ${frame.time.toFixed(3)}초 · ${mode} · 현재각 ${angle?.toFixed(1)??'—'}°`, 28, 59);
   const image=canvas.toDataURL("image/jpeg", 0.84);
+  item.snapshotOverlayVersion=2;
   canvas.width=1;canvas.height=1;
   return image;
 }
@@ -1027,7 +1030,7 @@ function patientPayload() {
       cirTrackingSamples:code==='CIR'?cirTrack(item.frames,item.measuredArm||patient().arm,analysisOptions(item)).map(row=>({analysisIndex:row.index,sourceFrame:row.sourceFrame,time:row.time,status:row.status,point:row.hand,normalized:row.relative,segment:row.segment??null})):null,
       missedFrames: item.missedFrames, validation: item.validation,
       validationTarget: item.validationTarget, validationTolerance: item.validationTolerance,
-      snapshot: item.snapshot, updatedAt: item.updatedAt,
+      snapshot: item.snapshot, updatedAt: item.updatedAt,snapshotOverlayVersion:item.snapshotOverlayVersion,
       autoRepresentativeFrame: item.autoRepresentativeFrame,
       manualRepresentativeFrame: item.manualRepresentativeFrame,
       finalRepresentativeFrame: item.finalRepresentativeFrame,
@@ -1104,8 +1107,8 @@ async function refreshSavedPatientList(selectedId = "") {
   } catch { /* IndexedDB may be disabled in private browser mode. */ }
 }
 
-async function regenerateCurrentSnapshot() {
-  const item=session(),code=state.activeMotion,arm=item.measuredArm||measuredPrefix(),index=representativeIndex(item);
+async function regenerateCurrentSnapshot(item=session(),code=state.activeMotion) {
+  const arm=item.measuredArm||measuredPrefix(),index=representativeIndex(item);
   if(!item.videoUrl||!Number.isInteger(index)||!item.frames[index])return;
   const video=document.createElement('video');video.muted=true;video.playsInline=true;video.className='analysis-decoder';document.body.appendChild(video);
   try {
@@ -1643,6 +1646,9 @@ function renderFinalSummary() {
     const detail=document.createElement('p');detail.textContent=item.analysisError||item.rom?.secondaryLabel||jobLabel(item);
     const button=document.createElement('button');button.className='button primary';button.textContent='상세결과 · 관절점 수정';button.disabled=!item.frames.length||['queued','analyzing'].includes(item.analysisStatus);button.onclick=()=>openDetail(code);
     card.append(title,value,detail,button);
+    if(item.snapshot){const image=document.createElement('img');image.className='final-representative';image.src=item.snapshot;image.alt=code+' 최종 대표 프레임 · 스켈레톤과 측정각도';card.append(image);}
+    else if(item.frames.length){const placeholder=document.createElement('p');placeholder.textContent='대표사진 없음 · 원본 연결 후 상세보기에서 대표 이미지 동기화';card.append(placeholder);}
+    if(item.videoUrl&&item.frames.length){const refresh=document.createElement('button');refresh.className='button ghost';refresh.textContent='대표사진·각도 갱신';refresh.onclick=async()=>{refresh.disabled=true;try{await regenerateCurrentSnapshot(item,code);renderResults();}catch(error){showToast(error.message);}finally{refresh.disabled=false;}};card.append(refresh);}
     if(item.endpointImages){const pair=document.createElement('div');pair.className='v52-endpoints';for(const [label,entry]of Object.entries(item.endpointImages)){const figure=document.createElement('figure'),image=document.createElement('img'),caption=document.createElement('figcaption');image.src=entry.image;image.alt=label==='extension'?'최대 신전':'최대 굴곡';caption.textContent=image.alt+' · '+entry.time.toFixed(3)+'초';figure.append(image,caption);pair.append(figure);}card.append(pair);}
     if(['error','cancelled'].includes(item.analysisStatus)){const retry=document.createElement('button');retry.className='button ghost';retry.textContent='다시 분석';retry.disabled=!item.videoUrl;retry.onclick=()=>queue.enqueue(code,item);card.append(retry);}
     $('#final-summary').append(card);
@@ -1674,10 +1680,11 @@ const queue=new AnalysisQueue(analyzeSession,()=>{
   if(state.view==='results'||(state.view==='capture'&&session().frames.length&&!['queued','analyzing'].includes(session().analysisStatus))){elements.slider.max=String(session().frames.length-1);renderResults();}
 });
 state.view='capture';state.draft=null;
-$('#final-analysis').onclick=()=>{
+$('#final-analysis').onclick=async()=>{
   if(!workflowStatus(state.sessions,activeMotions(state.criteria)).canFinalize)return;
   for(const code of MOTIONS){const item=state.sessions[code];if(!item.analysisStatus&&item.videoUrl)queue.enqueue(code,item);}
   setView('results');renderResults();
+  for(const code of activeMotions(state.criteria)){const item=state.sessions[code];if(item.videoUrl&&item.frames.length&&(!item.snapshot||item.snapshotOverlayVersion!==2)){try{await regenerateCurrentSnapshot(item,code);if(state.view==='results')renderResults();}catch(error){showToast(code+' 대표사진 생성 실패: '+error.message);}}}
 };
 $('#back-upload').onclick=()=>{setView('capture');selectMotion(state.activeMotion);};
 $('#discard-detail').onclick=discardDetail;

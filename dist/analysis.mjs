@@ -6,7 +6,7 @@ import { shoulderAngles, elbowAngles, LANDMARKS, isEdited } from './geometry.mjs
 export const POLICY = Object.freeze({ visibility: .45, shoulderTolerance: .05, gapFrames: 5, gapSeconds: .2, version: '5.2-wrist-provisional' });
 export const usable = p => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.status === 'manual' || Number(p.visibility ?? 0) >= POLICY.visibility);
 export function visiblePointIds(arm, motion) {
-  return LANDMARKS.filter(p => !['FE2','FE','ER','CIR'].includes(motion) || p.id.endsWith('_shoulder') || p.id.endsWith('_hip') || p.id.startsWith(arm + '_')).map(p=>p.id);
+  return LANDMARKS.filter(p => !['FE2','FE','ER','CIR'].includes(motion) || p.id.startsWith(arm + '_')).map(p=>p.id);
 }
 export function trackedHandPoint(points, arm, policy = 'bir', preference = 'auto') {
   const tip = points[arm+'_hand_tip'], wrist = points[arm+'_wrist'];

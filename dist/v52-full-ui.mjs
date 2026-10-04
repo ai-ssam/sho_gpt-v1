@@ -2,6 +2,7 @@ import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,activeMotions,validateCriteria} from './
 import {calibrateIRER,irerAuxiliary} from './motion-metrics.mjs';
 import {externalRotation} from './v5-core.mjs';
 import {templateStore,validateCapture,postureFeatures} from './neutral.mjs';
+import {setupAdminTabs} from './admin-tabs.mjs';
 
 export function validateSettingsBackup(v){
  if(v?.schema!=='shoulder-settings-1'||!Array.isArray(v.templates))throw Error('설정 백업 형식 오류');
@@ -25,12 +26,14 @@ export function setupFullV52(api){
  function ensureIdle(){if(queue.running||state.cameraBusy||state.refining||state.view==='detail')throw Error('촬영·분석·상세 수정 완료 후 설정하세요.');}
  const notify=()=>document.dispatchEvent(new window.Event('v52-settings-changed'));
  function save(c,d,apply=false){ensureIdle();validateCriteria(c);validateDefaults(d);localStorage.setItem('shoulder:v5:criteria',JSON.stringify(c));localStorage.setItem('shoulder:v52:defaults',JSON.stringify(d));state.defaults=d;
+  for(const item of Object.values(state.sessions)){item.frameStep=d.frameStep;if(apply)item.facing=d.facing;}
+  $('#frame-step').value=d.frameStep;
   if(!hasData()||apply){if(apply&&hasData()){state.criteriaHistory??=[];state.criteriaHistory.push({at:new Date().toISOString(),criteria:structuredClone(state.criteria),results:Object.fromEntries(ACTIVE_MOTIONS.map(k=>[k,structuredClone(state.sessions[k].rom)]))});}state.criteria=c;if(apply)for(const k of ACTIVE_MOTIONS){const item=state.sessions[k];item.measurementSettings={birMode:c.birMode,birDivisions:c.birDivisions};item.irerOptions=structuredClone(d.irer);item.measurementConfirmed=false;}
    notify();if(!activeMotions(c).includes(state.activeMotion))selectMotion(activeMotions(c)[0]);renderWorkflow();}
   $('#full-status').textContent=hasData()&&!apply?'기본값 저장됨 · 현재 검사 기준은 유지됩니다. 새 검사부터 적용하거나 재계산을 선택하세요.':'기본값 저장·적용 완료 · 임상 미검증 시험 기준';
  }
  function read(){const c=structuredClone(state.criteria),d=validateDefaults({arm:$('#full-arm').value,frameStep:Number($('#full-step').value),facing:$('#full-facing').value,irer:{maxDifference:Number($('#full-difference').value),scaleTolerance:Number($('#full-scale').value)}});c.activeMotions=[...$('#full-motions').querySelectorAll('[data-motion]:checked')].map(x=>x.dataset.motion);for(const input of $('#full-motions').querySelectorAll('[data-weight]')){if(input.value==='')throw Error('가중치를 입력하세요.');c.weights[input.dataset.weight]=Number(input.value);}c.thresholds={...structuredClone(DEFAULT_CRITERIA.thresholds),...c.thresholds};const n=Number($('#full-bir').value),old=c.birDivisions??10;c.thresholds.BIR=(c.birMode==='relative-t'?c.thresholds.BIR:DEFAULT_CRITERIA.thresholds.BIR).map(v=>v*n/old);c.birDivisions=n;c.birMode='relative-t';c.version='pc-full-'+new Date().toISOString();return {c:validateCriteria(c),d};}
- $('#full-save').onclick=()=>{try{const {c,d}=read();save(c,d);}catch(e){$('#full-status').textContent=e.message;}};
+ $('#full-save').onclick=()=>{try{const {c,d}=read();save(c,d,true);const prior=state.activeMotion;for(const k of activeMotions(c)){selectMotion(k);recalculateCurrentRom();}selectMotion(prior);renderAll();$('#full-status').textContent='설정 저장·현재 검사 적용 완료. 분석 간격 변경은 다음 분석·재분석부터 적용됩니다. 저장된 과거 검사는 유지됩니다.';}catch(e){$('#full-status').textContent=e.message;}};
  $('#full-equal').onclick=()=>{const codes=[...$('#full-motions').querySelectorAll('[data-motion]:checked')].map(x=>x.dataset.motion);for(const input of $('#full-motions').querySelectorAll('[data-weight]'))input.value=codes.includes(input.dataset.weight)?(codes.indexOf(input.dataset.weight)===codes.length-1?100-Math.floor(10000/codes.length)/100*(codes.length-1):Math.floor(10000/codes.length)/100):0;};
  $('#full-reset').onclick=()=>{try{save(structuredClone(DEFAULT_CRITERIA),structuredClone(defaults));fields();}catch(e){showToast(e.message);}};
  $('#full-reapply').onclick=()=>{try{const c=validateCriteria(JSON.parse(localStorage.getItem('shoulder:v5:criteria'))||structuredClone(DEFAULT_CRITERIA));save(c,state.defaults,true);const prior=state.activeMotion;for(const k of activeMotions(c)){selectMotion(k);recalculateCurrentRom();}selectMotion(prior);renderAll();showToast('최신 기준으로 재계산했습니다. 저장하면 검사에 반영됩니다.');}catch(e){showToast(e.message);}};
@@ -65,4 +68,5 @@ export function setupFullV52(api){
  const settings=$('#v5-settings');settings.prepend(settings.querySelector('h2'));settings.prepend($('#v52-admin-close'));
  const grid=$('.motion-grid');for(const code of ACTIVE_MOTIONS){const card=grid.querySelector(`[data-motion="${code}"]`);if(card)grid.append(card);}
  fields();render();
+ setupAdminTabs(settings);
 }

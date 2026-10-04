@@ -20,6 +20,13 @@ import {makeTemplate,templatePose,validateCapture,templateStore} from '../dist/n
 import {indexedDB} from 'fake-indexeddb';
 import {signedElevation,fe2Metrics,birHeight,calibrateIRER,irerAuxiliary} from '../dist/motion-metrics.mjs';
 import {validateSettingsBackup} from '../dist/v52-full-ui.mjs';
+import {drawMeasurementSector} from '../dist/angle-sector.mjs';
+
+test('representative angle wedge uses measured shoulder vectors and rejects missing points',()=>{
+ const arcs=[],labels=[],ctx=new Proxy({arc:(...args)=>arcs.push(args),fillText:text=>labels.push(text)},{get:(o,k)=>o[k]??(()=>{}),set:(o,k,v)=>(o[k]=v,true)});
+ const corrected={right_shoulder:{x:.5,y:.3,visibility:1},right_hip:{x:.5,y:.7,visibility:1},right_elbow:{x:.8,y:.3,visibility:1}};
+ assert.equal(drawMeasurementSector(ctx,1000,1000,{corrected},'right','AB'),true);assert.ok(Math.abs(Math.abs(arcs[0][4]-arcs[0][3])-Math.PI/2)<1e-6);assert.equal(labels[0],'90.0°');assert.equal(drawMeasurementSector(ctx,1000,1000,{corrected:{}},'right','AB'),false);
+});
 
 test('settings restore rejects invalid capture duration and missing template references before writing',()=>{
  const backup={schema:'shoulder-settings-1',criteria:structuredClone(DEFAULT_CRITERIA),templates:[],selected:{},capture:{startSeconds:1.5,returnSeconds:1.2}};
