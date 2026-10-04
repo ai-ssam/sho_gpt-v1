@@ -19,13 +19,13 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   const app=await import('../dist/app.js');
   assert.equal(w.document.body.dataset.view,'capture');assert.equal(w.document.querySelector('#final-analysis').disabled,true);
   w.document.querySelector('#temporary-patient').click();
-  for(const code of ['AB','FE','ER','BIR','IRER']) {
+  for(const code of ['AB','FE2','FE','ER','BIR','IRER']) {
     const frames=Array.from({length:10},(_,index)=>{const points=templatePoints(index/9*Math.PI);for(const p of Object.values(points)){p.visibility=1;p.status='detected';p.aspectRatio=16/9;}return{...frameRecord({index,time:index/30,motion:code,points}),sourceFrame:index};});
     const rom=analyzeRom(frames,'right',code,{cirStartFrame:0,cirEndFrame:9});
     Object.assign(app.state.sessions[code],{frames,fileName:code+'.mp4',fileSize:100,sourceFile:new Blob(['test-video'],{type:'video/mp4'}),rom,autoRom:structuredClone(rom),analysisStatus:rom?.valid?'complete':'review',autoRepresentativeFrame:rom?.representativeFrameIndex,finalRepresentativeFrame:rom?.representativeFrameIndex,measuredArm:'right'});
   }
   app.setView('capture');assert.equal(w.document.querySelector('#final-analysis').disabled,false);
-  w.document.querySelector('#final-analysis').click();assert.equal(w.document.body.dataset.view,'results');assert.equal(w.document.querySelectorAll('.final-motion').length,5);
+  w.document.querySelector('#final-analysis').click();assert.equal(w.document.body.dataset.view,'results');assert.equal(w.document.querySelectorAll('.final-motion').length,4);
   const original=structuredClone(app.state.sessions.FE);
   app.openDetail('FE');assert.equal(w.document.body.dataset.view,'detail');assert.notEqual(app.session(),app.state.sessions.FE);
   const landmarks=w.document.querySelector('#landmark-list').textContent;assert.match(landmarks,/왼쪽 골반/);assert.doesNotMatch(landmarks,/왼쪽 팔꿈치/);assert.match(landmarks,/오른쪽 팔꿈치/);
@@ -39,8 +39,8 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   await new Promise(r=>setTimeout(r,40));
   assert.ok(w.document.querySelector('#saved-patients').options.length>1);
   assert.ok(w.document.querySelector('#toast').textContent.includes('저장'));
-  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('shoulder-rom-lab',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-  const saved=await new Promise(resolve=>{const request=db.transaction('patients').objectStore('patients').get(payload.patient.id);request.onsuccess=()=>resolve(request.result);});
+  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('shoulder-rom-lab',2);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  const saved=await new Promise(resolve=>{const request=db.transaction('exams').objectStore('exams').get(payload.examId);request.onsuccess=()=>resolve(request.result);});
   assert.equal(saved.schemaVersion,'5.0');assert.equal(await saved.videos.FE.text(),'test-video');
   assert.equal(saved.criteria.label,'동작 의심도점수');db.close();
   w.document.querySelector('#load-patient').click();await new Promise(r=>setTimeout(r,80));
@@ -59,7 +59,7 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   assert.deepEqual(app.patientPayload().criteria.stages.boundaries,[25,60]);
   $('#v52-boundary-0').value='90';$('#v52-save-settings').click();assert.deepEqual(app.state.criteria.stages.boundaries,[25,60]);assert.match($('#v52-settings-status').textContent,/경계/);
   assert.equal($('#v52-video-input').accept,'video/*');assert.equal($('#bir-tracking').value,'wrist');
-  assert.equal($('#v52-files').querySelectorAll('.v52-file').length,5);
+  assert.equal($('#v52-files').querySelectorAll('.v52-file').length,4);
   // Exercise the actual upload -> frozen still -> editable points -> versioned save UI.
   const neutralVideo=$('#v52-video');
   for(const [k,v]of Object.entries({videoWidth:640,videoHeight:360,readyState:2,duration:2}))Object.defineProperty(neutralVideo,k,{value:v,configurable:true});
@@ -77,6 +77,19 @@ test('등록 → 최종 결과 → 상세 수정/취소/반영 → 저장 복원
   $('#v52-use-neutral').click();assert.match($('#v52-neutral-status').textContent,/기준 선택 적용됨/);
   const {templateStore}=await import('../dist/neutral.mjs');const templates=await templateStore('list');assert.equal(templates.length,1);assert.equal(templates[0].source.kind,'upload');assert.equal(templates[0].corrected.right_wrist.x,.51);assert.equal(templates[0].raw.right_wrist.x,.5);
   $('#v52-admin-close').click();assert.equal(w.document.body.dataset.admin,'false');
+  // PC defaults must not silently rewrite the active exam's measurement policy.
+  const priorCriteria=structuredClone(app.state.criteria);
+  $('#full-bir').value='20';$('#full-step').value='5';$('#full-arm').value='left';$('#full-save').click();
+  assert.deepEqual(app.state.criteria,priorCriteria);
+  assert.equal(JSON.parse(localStorage.getItem('shoulder:v5:criteria')).birDivisions,20);
+  assert.equal(app.state.defaults.frameStep,5);
+  assert.equal(app.patientPayload().criteria.birDivisions,10);
+  const invalid=structuredClone(app.patientPayload());invalid.measurements.FE2.fe2ExtensionFrame=999;
+  assert.throws(()=>app.validateImport(invalid),/극점/);
+  invalid.measurements.FE2.fe2ExtensionFrame=null;invalid.measurements.IRER.irerCalibration={arm:'right',reference:'wrist',forearm:-1,oppositeUpper:.2};
+  assert.throws(()=>app.validateImport(invalid),/보정/);
+  assert.equal($('#v52-view').value,'정면');$('#v52-motion').value='FE2';$('#v52-motion').dispatchEvent(new w.Event('change'));assert.equal($('#v52-view').value,'측면');
+  assert.deepEqual([...w.document.querySelectorAll('.motion-card')].filter(x=>!x.hidden).map(x=>x.dataset.motion),['AB','FE2','BIR','IRER']);
   app.state.sessions.FE.videoUrl='blob:keep-on-back';
   const hide=new w.Event('pagehide');Object.defineProperty(hide,'persisted',{value:true});w.dispatchEvent(hide);
   assert.equal(app.state.sessions.FE.videoUrl,'blob:keep-on-back','뒤로가기 캐시 복귀 시 영상 연결 유지');

@@ -1,4 +1,4 @@
-import {ACTIVE_MOTIONS,DEFAULT_STAGES,validateStages,validateCriteria} from './v5-core.mjs';
+import {ACTIVE_MOTIONS,activeMotions,DEFAULT_STAGES,validateStages,validateCriteria} from './v5-core.mjs';
 import {DEFAULT_CAPTURE,validateCapture,makeTemplate,templateStore} from './neutral.mjs';
 import {POSE_LANDMARKS} from './geometry.mjs';
 import {InferenceClient} from './inference.mjs';
@@ -31,7 +31,7 @@ export function setupV52({state,patient,camera,queue,selectMotion,renderAll,show
  $('#v5-settings-button').onclick=()=>{
   if(state.cameraBusy||state.refining||state.view==='detail'){showToast('촬영·상세 수정을 완료한 뒤 설정하세요.');return;}
   if(document.body.dataset.admin==='true'){closeAdmin();return;}
-  camera.stop();settingsFields();admin.hidden=false;document.body.dataset.admin='true';history();
+  camera.stop();document.dispatchEvent(new window.Event('v52-settings-changed'));settingsFields();admin.hidden=false;document.body.dataset.admin='true';history();
  };
  $('#v52-admin-close').onclick=closeAdmin;
  document.addEventListener('v52-criteria',settingsFields);
@@ -62,7 +62,7 @@ export function setupV52({state,patient,camera,queue,selectMotion,renderAll,show
   try{const next={...selected,[key()]:$('#v52-history').value};localStorage.setItem('shoulder:v52:neutral-selection',JSON.stringify(next));selected=next;configured='';configure();$('#v52-neutral-status').textContent='기준 선택 적용됨 · '+($('#v52-history').selectedOptions[0]?.textContent??'');}catch(e){$('#v52-neutral-status').textContent=e.message;}
  }
  $('#v52-use-neutral').onclick=selectTemplate;
- for(const id of ['motion','arm','view'])$('#v52-'+id).onchange=()=>{clearDraft();if(id==='motion')$('#v52-view').value=['FE','ER'].includes($('#v52-motion').value)?'측면':$('#v52-motion').value==='BIR'?'후면':'정면';history();};
+ for(const id of ['motion','arm','view'])$('#v52-'+id).onchange=()=>{clearDraft();if(id==='motion')$('#v52-view').value=['FE2','FE','ER','CIR'].includes($('#v52-motion').value)?'측면':$('#v52-motion').value==='BIR'?'후면':'정면';history();};
  async function task(fn){if(working)return;working=true;const controls=[...admin.querySelectorAll('button,input,select')],disabled=controls.map(el=>el.disabled);controls.forEach(el=>el.disabled=true);try{await fn();}catch(e){$('#v52-neutral-status').textContent=e.message;}finally{working=false;controls.forEach((el,i)=>el.disabled=disabled[i]);$('#v52-save-neutral').disabled=!draft;}}
  $('#v52-connect').onclick=()=>task(async()=>{
   cleanup();clearDraft();camera.stop();if(!navigator.mediaDevices?.getUserMedia)throw Error('이 브라우저에서 카메라를 지원하지 않습니다. 기준 영상 업로드를 사용하세요.');
@@ -116,9 +116,9 @@ export function setupV52({state,patient,camera,queue,selectMotion,renderAll,show
  $('#motion-grid').insertAdjacentHTML('afterend','<section id="v52-upload-files" class="card v52-block"><h3>등록 영상 · 파일정보</h3><div id="v52-files"></div></section>');
  let filesKey='';
  function files(){
-  const signature=JSON.stringify(ACTIVE_MOTIONS.map(k=>{const s=state.sessions[k];return[k,s.fileName,s.fileSize,s.duration,s.videoWidth,s.videoHeight,s.videoUrl,s.analysisStatus,s.snapshot];}));if(signature===filesKey)return;filesKey=signature;
+  const signature=JSON.stringify(activeMotions(state.criteria).map(k=>{const s=state.sessions[k];return[k,s.fileName,s.fileSize,s.duration,s.videoWidth,s.videoHeight,s.videoUrl,s.analysisStatus,s.snapshot];}));if(signature===filesKey)return;filesKey=signature;
   const root=$('#v52-files');root.replaceChildren();
-  for(const code of ACTIVE_MOTIONS){const item=state.sessions[code];if(!item.fileName)continue;
+  for(const code of activeMotions(state.criteria)){const item=state.sessions[code];if(!item.fileName)continue;
    const row=document.createElement('article');row.className='v52-file';const media=document.createElement('video');media.muted=true;media.preload='auto';media.playsInline=true;media.setAttribute('aria-label',code+' 영상 썸네일');
    if(item.snapshot){const img=document.createElement('img');img.src=item.snapshot;img.alt=code+' 영상 대표 썸네일';row.append(img);}else if(item.videoUrl){media.src=item.videoUrl;row.append(media);}else{const note=document.createElement('span');note.textContent='원본 다시 연결 필요';row.append(note);}
    const info=document.createElement('div'),title=document.createElement('strong'),detail=document.createElement('p');title.textContent=code+' · '+item.fileName;detail.textContent=`${Number(item.duration||0).toFixed(2)}초 · ${item.videoWidth||'—'}×${item.videoHeight||'—'} · ${(item.fileSize/1048576).toFixed(2)} MB · ${item.analysisStatus||'등록됨'}`;info.append(title,detail);row.append(info);

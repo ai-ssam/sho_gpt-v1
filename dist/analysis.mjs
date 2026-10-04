@@ -1,11 +1,12 @@
 import { externalRotation } from './v5-core.mjs';
+import {fe2Metrics,birHeight,irerAuxiliary} from './motion-metrics.mjs';
 // v5 measurement policy; CIR remains available for legacy records.
 export * from './geometry.mjs';
 import { shoulderAngles, elbowAngles, LANDMARKS, isEdited } from './geometry.mjs';
 export const POLICY = Object.freeze({ visibility: .45, shoulderTolerance: .05, gapFrames: 5, gapSeconds: .2, version: '5.2-wrist-provisional' });
 export const usable = p => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.status === 'manual' || Number(p.visibility ?? 0) >= POLICY.visibility);
 export function visiblePointIds(arm, motion) {
-  return LANDMARKS.filter(p => !['FE','ER','CIR'].includes(motion) || p.id.endsWith('_shoulder') || p.id.endsWith('_hip') || p.id.startsWith(arm + '_')).map(p=>p.id);
+  return LANDMARKS.filter(p => !['FE2','FE','ER','CIR'].includes(motion) || p.id.endsWith('_shoulder') || p.id.endsWith('_hip') || p.id.startsWith(arm + '_')).map(p=>p.id);
 }
 export function trackedHandPoint(points, arm, policy = 'bir', preference = 'auto') {
   const tip = points[arm+'_hand_tip'], wrist = points[arm+'_wrist'];
@@ -109,6 +110,7 @@ export function reachLevel(value) {
 }
 export function analyzeRom(frames,arm='right',motion='AB',options={}) {
   if(!frames.length)return null;
+  if(motion==='FE2')return {motion,arm,...fe2Metrics(frames,arm,options)};
   const angles=frames.map((f,index)=>({index,value:shoulderAngles(f.corrected)[arm]})).filter(r=>Number.isFinite(r.value));
   const min=angles.reduce((a,b)=>b.value<a.value?b:a,{index:null,value:Infinity}),max=angles.reduce((a,b)=>b.value>a.value?b:a,{index:null,value:-Infinity});
   const base={motion,arm,rom:angles.length?max.value-min.value:null,minAngle:angles.length?min.value:null,maxAngle:angles.length?max.value:null,minFrameIndex:min.index,maxFrameIndex:max.index,representativeFrameIndex:max.index,primaryLabel:'어깨 가동범위',primaryValue:angles.length?+(max.value-min.value).toFixed(1):'미검출',primaryUnit:'°',secondaryLabel:angles.length?`${min.value.toFixed(1)}° → ${max.value.toFixed(1)}°`:'유효 관절점 부족',valid:angles.length>0,validFrames:angles.length};
@@ -116,9 +118,15 @@ export function analyzeRom(frames,arm='right',motion='AB',options={}) {
     const rows=frames.map((f,index)=>({index,value:externalRotation(f.worldCorrected??f.worldRaw,arm)})).filter(r=>Number.isFinite(r.value));
     if(!rows.length)return {...base,valid:false,rom:null,minAngle:null,maxAngle:null,primaryValue:'확인 필요',primaryLabel:'외회전각 (3D 추정)',primaryUnit:'',secondaryLabel:'팔꿈치를 몸통 옆에 붙이고 90°를 유지하세요.',representativeFrameIndex:0};
     const lo=rows.reduce((a,b)=>a.value<b.value?a:b),hi=rows.reduce((a,b)=>a.value>b.value?a:b);
-    return {...base,valid:true,rom:hi.value-lo.value,minAngle:lo.value,maxAngle:hi.value,minFrameIndex:lo.index,maxFrameIndex:hi.index,representativeFrameIndex:hi.index,primaryValue:+hi.value.toFixed(1),primaryLabel:'최대 외회전각 (3D 추정)',primaryUnit:'°',secondaryLabel:'3D 추정 · 관절점/자세를 확인한 뒤 평가에 반영',validFrames:rows.length};
+    const auxiliary=irerAuxiliary(frames[hi.index].corrected,arm,options.irerCalibration,hi.value,options.irerOptions);
+    return {...base,valid:true,rom:hi.value-lo.value,minAngle:lo.value,maxAngle:hi.value,minFrameIndex:lo.index,maxFrameIndex:hi.index,representativeFrameIndex:hi.index,primaryValue:+hi.value.toFixed(1),primaryLabel:'최대 외회전각 (3D 추정)',primaryUnit:'°',secondaryLabel:'3D 추정 · '+auxiliary.warnings.join(' / '),validFrames:rows.length,auxiliary,calibration:options.irerCalibration??null};
   }
   if(motion==='BIR') {
+    if(options.birMode==='relative-t'){
+      const rows=frames.map((f,index)=>({index,height:birHeight(f.corrected,arm,options.birDivisions??10),elbow:elbowAngles(f.corrected)[arm]}));
+      const best=rows.filter(r=>r.height).reduce((a,b)=>!a||b.height.raw>a.height.raw?b:a,null),elbow=rows.filter(r=>Number.isFinite(r.elbow)).reduce((a,b)=>!a||b.elbow<a.elbow?b:a,null);
+      return {...base,valid:!!best,primaryLabel:'손목 상대 도달 높이',primaryValue:best?'t'+best.height.integer:'미검출',primaryUnit:'',tRaw:best?.height.raw??null,tInteger:best?.height.integer??null,divisions:options.birDivisions??10,trackingPoint:'wrist',trackedPoint:'손목',reachIndex:best?best.height.raw/(options.birDivisions??10)*100:null,maxReachFrameIndex:best?.index??null,minElbowAngle:elbow?.elbow??null,minElbowFrameIndex:elbow?.index??null,representativeFrameIndex:best?.index??0,secondaryLabel:'골반 t0 → 어깨 t'+(options.birDivisions??10)+' · 손목 기준 · 척추 번호 아님'};
+    }
     const reaches=frames.map((f,index)=> {
       const s=f.corrected[arm+'_shoulder'],h=f.corrected[arm+'_hip'],p=trackedHandPoint(f.corrected,arm,'bir',options.birTrackingPoint||'auto');
       if(!usable(s)||!usable(h)||!p||h.y-s.y<.05)return null;

@@ -18,6 +18,48 @@ import {classifyScore,validateStages} from '../dist/v5-core.mjs';
 import {trackedHandPoint} from '../dist/analysis.mjs';
 import {makeTemplate,templatePose,validateCapture,templateStore} from '../dist/neutral.mjs';
 import {indexedDB} from 'fake-indexeddb';
+import {signedElevation,fe2Metrics,birHeight,calibrateIRER,irerAuxiliary} from '../dist/motion-metrics.mjs';
+
+function sidePoints(angle,arm='right',facing='right'){
+ const p=(x,y)=>({x,y,visibility:1,aspectRatio:1}),r=angle*Math.PI/180;
+ return {[arm+'_shoulder']:p(.5,.35),[arm+'_hip']:p(.5,.85),[arm+'_elbow']:p(.5+Math.sin(r)*.25*(facing==='right'?1:-1),.35+Math.cos(r)*.25)};
+}
+test('FE2 signed extremes, mirror/side invariance and explicit endpoint corrections',()=>{
+ for(const arm of ['left','right'])for(const facing of ['left','right']){
+  const frames=[0,-20,-45,0,60,170,0].map(a=>({corrected:sidePoints(a,arm,facing)}));
+  assert.ok(Math.abs(signedElevation(frames[2].corrected,arm,facing)+45)<1e-6);
+  const r=fe2Metrics(frames,arm,{facing});assert.equal(r.valid,true);assert.ok(Math.abs(r.rom-215)<1e-6);assert.equal(r.extensionFrameIndex,2);assert.equal(r.flexionFrameIndex,5);
+  assert.ok(Math.abs(fe2Metrics(frames,arm,{facing,fe2ExtensionFrame:1}).rom-190)<1e-6);
+ }
+ assert.equal(fe2Metrics([{corrected:sidePoints(0)},{corrected:sidePoints(90)}],'right').valid,false);
+});
+test('FE2 auto stop requires extension then flexion, not the intermediate neutral crossing',()=>{
+ const a=new AutoCapture({startSeconds:1,returnSeconds:1}),neutral={valid:true,neutral:true,motion:'FE2'};
+ a.update(neutral,0,false);assert.equal(a.update(neutral,1000,false),'start');
+ a.update({valid:true,excursion:true,extension:true,motion:'FE2'},2000,true);a.update(neutral,3000,true);assert.equal(a.update(neutral,5000,true),null);
+ a.update({valid:true,excursion:true,flexion:true,motion:'FE2'},6000,true);a.update(neutral,7000,true);assert.equal(a.update(neutral,8000,true),'stop');
+});
+test('BIR t levels use wrist, tilted reference lines and half-away-from-zero rounding',()=>{
+ const p=(x,y)=>({x,y,visibility:1}),points={left_shoulder:p(.3,.2),right_shoulder:p(.7,.3),left_hip:p(.3,.7),right_hip:p(.7,.8),right_wrist:p(.5,.75)};
+ assert.equal(birHeight(points,'right').integer,0);points.right_wrist.y=.25;assert.equal(birHeight(points,'right').integer,10);
+ points.right_wrist.y=.825;assert.equal(birHeight(points,'right').integer,-1);points.right_wrist.y=.15;assert.equal(birHeight(points,'right').integer,12);
+ points.right_wrist.visibility=0;assert.equal(birHeight(points,'right'),null);
+});
+test('IRER calibrated auxiliary angle and uncertainty gates',()=>{
+ const p=(x,y)=>({x,y,visibility:1,aspectRatio:1}),points={left_shoulder:p(.7,.2),left_elbow:p(.7,.5),right_shoulder:p(.3,.2),right_elbow:p(.3,.5),right_wrist:p(.05,.5),right_hip:p(.3,.8)};
+ const calibration=calibrateIRER(points,'right');const moved=structuredClone(points);moved.right_wrist.x=.3-.25*Math.sin(Math.PI/6);
+ const aux=irerAuxiliary(moved,'right',calibration,30);assert.ok(Math.abs(aux.angle-30)<1e-6);assert.equal(aux.warnings.length,0);assert.equal(aux.inferredPoint.status,'estimated');
+ assert.ok(irerAuxiliary(moved,'right',calibration,65).warnings.includes('3D·길이 추정 불일치'));
+ moved.right_wrist.visibility=0;assert.equal(irerAuxiliary(moved,'right',calibration,30).angle,null);
+ assert.equal(irerAuxiliary(points,'left',calibration,30).angle,null);
+});
+test('active criteria validate and legacy score snapshots remain supported',()=>{
+ const c=structuredClone(DEFAULT_CRITERIA);c.activeMotions=['AB'];c.weights.AB=100;assert.doesNotThrow(()=>validateCriteria(c));
+ assert.equal(evaluate({AB:{rom:{valid:true,maxAngle:160}}},c).total,0);
+ c.activeMotions=['AB','AB'];assert.throws(()=>validateCriteria(c));
+ const legacy=structuredClone(DEFAULT_CRITERIA);delete legacy.activeMotions;delete legacy.birMode;legacy.weights={AB:25,FE:25,ER:10,BIR:15,IRER:25};
+ assert.doesNotThrow(()=>validateCriteria(legacy));assert.equal(evaluate({},legacy).rows.length,5);
+});
 
 test('v5.2 configurable stage boundaries include exact edges and reject invalid settings',()=>{
  const stages={boundaries:[25,60],labels:['제한 적음','경도','중증도']};
@@ -61,11 +103,11 @@ test('auto capture requires stable neutral, movement then stable return',()=>{
  assert.equal(a.update(neutral,7500,true),null);assert.equal(a.update(neutral,8700,true),'stop');
 });
 test('score boundaries and missing/confirmation gates',()=>{
- const sessions=Object.fromEntries(['AB','FE','ER','BIR','IRER'].map(code=>[code,{rom:{valid:true,maxAngle:180},analysisStatus:'complete',measurementConfirmed:true,birManualSpineLevel:'T7'}]));
+ const sessions=Object.fromEntries(['AB','FE2','BIR','IRER'].map(code=>[code,{rom:{valid:true,maxAngle:180,rom:220,tRaw:10,divisions:10},analysisStatus:'complete',measurementConfirmed:true,birManualSpineLevel:'T7'}]));
  assert.equal(evaluate(sessions).total,0);
  sessions.AB.rom.maxAngle=120;assert.equal(evaluate(sessions).rows[0].score,1);
  sessions.IRER.measurementConfirmed=false;assert.equal(evaluate(sessions).total,null);
- sessions.IRER.measurementConfirmed=true;sessions.BIR.birManualSpineLevel=null;assert.equal(evaluate(sessions).total,null);
+ sessions.IRER.measurementConfirmed=true;sessions.BIR.rom.tRaw=null;assert.equal(evaluate(sessions).total,null);
  const c=structuredClone(DEFAULT_CRITERIA);c.weights.AB=99;assert.throws(()=>validateCriteria(c));
 });
 test('refinement preserves edits and orders source frames',()=>{

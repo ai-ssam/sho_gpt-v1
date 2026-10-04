@@ -1,10 +1,10 @@
 import {createArchive} from './archive.mjs';
-import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,DEFAULT_STAGES,evaluate,validateCriteria} from './v5-core.mjs';
+import {ACTIVE_MOTIONS,activeMotions,DEFAULT_CRITERIA,DEFAULT_STAGES,evaluate,validateCriteria} from './v5-core.mjs';
 export function setupV5(api){
  const {state,session,patient,camera,queue,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload}=api;
  const $=s=>document.querySelector(s);
  let mode='upload',refining=false;
- try{const c=JSON.parse(localStorage.getItem('shoulder:v5:criteria'));if(c)state.criteria=validateCriteria(c);}catch{}
+ try{const c=JSON.parse(localStorage.getItem('shoulder:v5:criteria'));if(c?.activeMotions)state.criteria=validateCriteria(c);}catch{}
  const add=(target,position,html)=>$(target).insertAdjacentHTML(position,html);
  add('main','afterbegin',`<section id="v5-home" class="card v5-home"><span class="eyebrow">SHOULDER ROM LAB / V5</span><h2>어깨의 움직임을 기록하세요</h2><p>한쪽 팔 · 다섯 동작 · 동작당 한 번. 촬영한 영상과 결과를 함께 보관합니다.</p><div class="v5-mode-grid"><button class="v5-mode" data-mode="camera"><b>카메라로 촬영</b><span>자세 안내와 자동 촬영으로 검사하기 →</span></button><button class="v5-mode" data-mode="upload"><b>영상 업로드</b><span>준비한 영상으로 분석하기 →</span></button></div><button id="v5-resume" class="button ghost">진행 중 검사 / 저장된 검사 열기</button></section><nav class="v5-nav"><button id="v5-home-button" class="button ghost">홈</button><button id="v5-back" class="button ghost">이전 단계</button><span id="v5-mode-name">영상 업로드</span><button id="v5-switch" class="button ghost">모드 선택</button><button id="v5-settings-button" class="button ghost">PC 설정</button></nav><section id="v5-settings" class="card v5-settings" hidden><h2>평가 기준 설정</h2><p>동작 의심도점수 · 시험 기준. 설정 변경은 현재 검사에 적용하며 저장된 검사 기준은 보존합니다.</p><div class="table-scroll"><table><thead><tr><th>동작</th><th>가중치 %</th><th>0점 경계</th><th>1점 경계</th><th>2점 경계</th></tr></thead><tbody id="v5-criteria-rows"></tbody></table></div><label class="field">BIR 수준 (0점부터 3점까지, 각 줄은 |로 구분)<textarea id="v5-bir" rows="4"></textarea></label><div class="v5-actions"><button id="v5-settings-save" class="button primary">설정 적용</button><button id="v5-settings-export" class="button ghost">CSV 내보내기</button><label class="button ghost">CSV 가져오기<input id="v5-settings-import" type="file" accept=".csv" hidden></label><button id="v5-settings-reset" class="button ghost">샘플 기준 복원</button></div><p id="v5-settings-state" role="status"></p></section>`);
  add('.camera-settings','beforeend',`<label class="check-field"><input id="v5-auto" type="checkbox">중립자세 자동 촬영 (시험)</label><label class="field"><span>촬영 안내</span><select id="v5-sound"><option value="beep">신호음</option><option value="voice">음성</option><option value="off">끄기</option></select></label><div class="v5-guides"><label><input id="v5-center" type="checkbox" checked> 중심선</label><label><input id="v5-horizontal" type="checkbox" checked> 수평선</label><label><input id="v5-area" type="checkbox" checked> 촬영 영역</label><label><input id="v5-guide-text" type="checkbox" checked> 자세 안내</label></div>`);
@@ -35,12 +35,12 @@ export function setupV5(api){
  function settingsRows(){
   document.dispatchEvent(new window.Event('v52-criteria'));
   const body=$('#v5-criteria-rows');body.replaceChildren();
-  for(const k of ACTIVE_MOTIONS){
+  for(const k of activeMotions(state.criteria)){
    const row=document.createElement('tr'),name=document.createElement('th');name.textContent=k;row.append(name);
-   for(const [field,value]of [['weight',state.criteria.weights[k]],...(k==='BIR'?[]:state.criteria.thresholds[k].map((v,i)=>['t'+i,v]))]){
-    const cell=document.createElement('td'),input=document.createElement('input');input.type='number';input.min='0';input.step='.1';input.value=value;input.dataset.code=k;input.dataset.field=field;input.setAttribute('aria-label',k+' '+field);cell.append(input);row.append(cell);
+   for(const [field,value]of [['weight',state.criteria.weights[k]],...(k==='BIR'&&state.criteria.birMode!=='relative-t'?[]:state.criteria.thresholds[k].map((v,i)=>['t'+i,v]))]){
+    const cell=document.createElement('td'),input=document.createElement('input');input.type='number';if(k!=='BIR'||field==='weight')input.min='0';input.step='.1';input.value=value;input.dataset.code=k;input.dataset.field=field;input.setAttribute('aria-label',k+' '+field);cell.append(input);row.append(cell);
    }body.append(row);
-  }$('#v5-bir').value=state.criteria.bir.map(a=>a.join('|')).join('\n');
+  }$('#v5-bir').value=state.criteria.bir.map(a=>a.join('|')).join('\n');$('#v5-bir').closest('label').hidden=state.criteria.birMode==='relative-t';
  }
  function saveCriteria(c){
   if(refining||state.cameraBusy||state.view==='detail')throw Error('촬영·편집을 완료한 뒤 기준을 변경하세요.');
@@ -52,16 +52,23 @@ export function setupV5(api){
  }catch(e){$('#v5-settings-state').textContent=e.message;}};
  $('#v5-settings-reset').onclick=()=>{try{saveCriteria(structuredClone(DEFAULT_CRITERIA));}catch(e){showToast(e.message);}};
  $('#v5-settings-export').onclick=()=>{
-  const rows=['motion,weight,score,min_inclusive,max_exclusive,categories,display_stages_uri'];
+  const rows=['motion,weight,score,min_inclusive,max_exclusive,categories,display_stages_uri,criteria_uri'];
   const stages=encodeURIComponent(JSON.stringify(state.criteria.stages??DEFAULT_STAGES));
-  for(const k of ACTIVE_MOTIONS)for(let i=0;i<4;i++){const t=state.criteria.thresholds[k];rows.push([k,state.criteria.weights[k],i,k==='BIR'?'':i===3?0:t[i],k==='BIR'||i===0?'':t[i-1],k==='BIR'?state.criteria.bir[i].join('|'):'',stages].join(','));}
+  for(const k of activeMotions(state.criteria))for(let i=0;i<4;i++){const t=state.criteria.thresholds[k],legacyBir=k==='BIR'&&state.criteria.birMode!=='relative-t';rows.push([k,state.criteria.weights[k],i,legacyBir?'':i===3?(k==='BIR'?'-Infinity':0):t[i],legacyBir||i===0?'':t[i-1],legacyBir?state.criteria.bir[i].join('|'):'',stages,encodeURIComponent(JSON.stringify(state.criteria))].join(','));}
   download('shoulder-v5-criteria.csv',new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));
  };
  $('#v5-settings-import').onchange=async e=>{try{
   const file=e.target.files[0];if(!file)return;if(file.size>100000)throw Error('CSV 파일이 너무 큽니다.');
   const lines=(await file.text()).replace(/^\uFEFF/,'').trim().split(/\r?\n/).map(l=>l.split(','));
   const header=lines.shift(),col=name=>header.indexOf(name),legacy=header.includes('motion_code');
-  const c=structuredClone(DEFAULT_CRITERIA),seen=new Set();
+  if(col('criteria_uri')>=0){
+   const c=JSON.parse(decodeURIComponent(lines[0][col('criteria_uri')])),motions=activeMotions(c),seen=new Set();
+   for(const r of lines){const k=r[col('motion')],i=Number(r[col('score')]);if(!motions.includes(k)||![0,1,2,3].includes(i)||seen.has(k+':'+i))throw Error('CSV 구간 중복·누락');seen.add(k+':'+i);const weight=Number(r[col('weight')]);if(i&&c.weights[k]!==weight)throw Error('동작별 가중치 불일치');c.weights[k]=weight;if(k==='BIR'&&c.birMode!=='relative-t')c.bir[i]=r[col('categories')].split('|');else if(i<3)c.thresholds[k][i]=Number(r[col('min_inclusive')]);}
+   if(seen.size!==motions.length*4)throw Error('모든 동작에 4개 구간이 필요합니다.');
+   for(const r of lines){const k=r[col('motion')],i=Number(r[col('score')]);if(k==='BIR'&&c.birMode!=='relative-t')continue;const hi=r[col('max_exclusive')],lo=r[col('min_inclusive')];if((i===0?hi!=='':hi===''||Number(hi)!==c.thresholds[k][i-1])||(i===3&&lo!==(k==='BIR'?'-Infinity':'0')))throw Error('CSV 구간 경계가 연결되지 않습니다.');}
+   c.version='csv-'+new Date().toISOString();saveCriteria(c);return;
+  }
+  const c=structuredClone(DEFAULT_CRITERIA),seen=new Set();delete c.activeMotions;delete c.birMode;
   if(col('display_stages_uri')>=0){const values=lines.map(r=>r[col('display_stages_uri')]);if(!values[0]||values.some(v=>v!==values[0]))throw Error('3단계 표시 기준이 일치하지 않습니다.');c.stages=JSON.parse(decodeURIComponent(values[0]));}
   for(const r of lines){
    const k=r[col(legacy?'motion_code':'motion')],i=Number(r[col('score')]),key=k+':'+i;
@@ -145,6 +152,7 @@ export function setupV5(api){
   if(state.legacyMeasurements?.CIR){const note=document.createElement('p');note.textContent='이전 CIR 기록 보존됨 · JSON 내보내기에 포함';panel.append(note);}
  }
  document.addEventListener('v5-render',render);
+ document.addEventListener('v52-settings-changed',settingsRows);
  for(const id of ['prev-frame','next-frame','frame-slider'])$('#'+id).addEventListener(id==='frame-slider'?'input':'click',()=>setTimeout(render,100));
  document.querySelectorAll('.motion-card').forEach(b=>b.addEventListener('click',()=>{$('#v5-range-start').value=session().analysisRange?.start??0;$('#v5-range-end').value=session().analysisRange?.end??session().duration??'';render();}));
  settingsRows();render();

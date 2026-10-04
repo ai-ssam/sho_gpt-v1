@@ -8,7 +8,7 @@
   <title>Shoulder ROM Lab</title>
   <link rel="stylesheet" href="./styles.css?v=5.2.0" />
   <link rel="stylesheet" href="./v5.css?v=5.2.0" />
-  <link rel="stylesheet" href="./v52.css?v=5.2.0" />
+  <link rel="stylesheet" href="./v52.css?v=5.2.0-full1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d6756'/%3E%3Ctext x='5' y='22' font-size='17' fill='white'%3ESR%3C/text%3E%3C/svg%3E" />
 </head>
 <body data-view="capture">
@@ -63,6 +63,8 @@
         </div>
       </div>
       <div id="motion-grid" class="motion-grid" role="listbox" aria-label="어깨 측정 동작">
+        <button class="motion-card" type="button" data-motion="FE2" aria-selected="false"><span class="motion-top"><b>FE2</b><i>측면</i></span><img class="motion-image" src="./assets/motions/fe.svg" alt="신전–굴곡 통합 동작"/><strong>신전–굴곡 통합</strong><span>뒤로 최대 이동 → 앞으로 최대 올림</span><small>전체 가동범위</small><em class="upload-state">영상 없음</em></button>
+        <button class="motion-card" type="button" data-motion="CIR" aria-selected="false" hidden><span class="motion-top"><b>CIR</b><i>측면 · 보류</i></span><img class="motion-image" src="./assets/motions/cir.svg" alt="회전 궤적"/><strong>회전 궤적</strong><span>관리자 선택 동작</span><small>손끝 궤적</small><em class="upload-state">영상 없음</em></button>
         <button class="motion-card selected" type="button" data-motion="AB" aria-selected="true">
           <span class="motion-top"><b>AB</b><i>정면</i></span>
           <img class="motion-image" src="./assets/motions/ab.svg" alt="외전 AB 동작 안내" />
@@ -81,7 +83,7 @@
         <button class="motion-card" type="button" data-motion="BIR" aria-selected="false">
           <span class="motion-top"><b>BIR</b><i>후면</i></span>
           <img class="motion-image" src="./assets/motions/bir.svg" alt="기능적 내회전 BIR 동작 안내" />
-          <strong>기능적 내회전</strong><span>손등을 등 뒤로 올리기</span><small>척추 도달 높이</small><em class="upload-state">영상 없음</em>
+          <strong>기능적 내회전</strong><span>손등을 등 뒤로 올리기</span><small>손목 상대 높이 t지표</small><em class="upload-state">영상 없음</em>
         </button>
         <button class="motion-card" type="button" data-motion="IRER" aria-selected="false">
           <span class="motion-top"><b>IRER</b><i>정면</i></span>

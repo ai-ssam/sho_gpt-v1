@@ -1,10 +1,16 @@
 import { angleAt } from './geometry.mjs';
-export const ACTIVE_MOTIONS=['AB','FE','ER','BIR','IRER'];
-export const DEFAULT_CRITERIA={version:'sample-0.1.0',label:'동작 의심도점수',weights:{AB:25,FE:25,ER:10,BIR:15,IRER:25},thresholds:{AB:[150,120,90],FE:[150,120,90],ER:[40,30,20],IRER:[60,40,20]},bir:[['T1','T2','T3','T4','T5','T6','T7','above_T1'],['T8','T9','T10','T11','T12'],['L1','L2','L3','L4','L5'],['천골','sacrum','buttock_or_below','unable_to_reach_behind_back']]};
+import {signedElevation} from './motion-metrics.mjs';
+export const ACTIVE_MOTIONS=['AB','FE2','BIR','IRER','FE','ER','CIR'];
+export const DEFAULT_MOTIONS=['AB','FE2','BIR','IRER'];
+export const DEFAULT_CRITERIA={version:'sample-v52-full-1',label:'동작 의심도점수',activeMotions:[...DEFAULT_MOTIONS],birDivisions:10,birMode:'relative-t',weights:{AB:25,FE2:35,BIR:15,IRER:25,FE:0,ER:0,CIR:0},thresholds:{AB:[150,120,90],FE2:[200,160,120],BIR:[8,5,2],FE:[150,120,90],ER:[40,30,20],IRER:[60,40,20],CIR:[90,75,50]},bir:[['T1','T2','T3','T4','T5','T6','T7','above_T1'],['T8','T9','T10','T11','T12'],['L1','L2','L3','L4','L5'],['천골','sacrum','buttock_or_below','unable_to_reach_behind_back']]};
+export const activeMotions=c=>c?.activeMotions??['AB','FE','ER','BIR','IRER'];
 export function validateCriteria(c){
  if(!c||c.label!=='동작 의심도점수'||!c.version)throw Error('기준 이름과 버전을 확인하세요.');
- if(ACTIVE_MOTIONS.some(k=>!Number.isFinite(c.weights?.[k])||c.weights[k]<0)||Math.abs(ACTIVE_MOTIONS.reduce((s,k)=>s+c.weights[k],0)-100)>.00001)throw Error('가중치 합계는 100이어야 합니다.');
- for(const k of ['AB','FE','ER','IRER']){const t=c.thresholds?.[k];if(!Array.isArray(t)||t.length!==3||!t.every(Number.isFinite)||!(t[0]>t[1]&&t[1]>t[2]&&t[2]>=0))throw Error(k+' 경계값은 큰 값부터 3개를 입력하세요.');}
+ const motions=activeMotions(c);
+ if(!Array.isArray(motions)||!motions.length||new Set(motions).size!==motions.length||motions.some(k=>!ACTIVE_MOTIONS.includes(k)))throw Error('활성 동작 목록을 확인하세요.');
+ if(motions.some(k=>!Number.isFinite(c.weights?.[k])||c.weights[k]<0)||Math.abs(motions.reduce((s,k)=>s+c.weights[k],0)-100)>.00001)throw Error('활성 동작 가중치 합계는 100이어야 합니다.');
+ for(const k of motions.filter(k=>k!=='BIR'||c.birMode==='relative-t')){const t=c.thresholds?.[k];if(!Array.isArray(t)||t.length!==3||!t.every(Number.isFinite)||!(t[0]>t[1]&&t[1]>t[2])||(k!=='BIR'&&t[2]<0))throw Error(k+' 경계값은 큰 값부터 3개를 입력하세요.');}
+ if(c.birMode==='relative-t'&&(!Number.isInteger(c.birDivisions)||c.birDivisions<1||c.birDivisions>100))throw Error('BIR 분할 수는 1~100 정수입니다.');
  if(!Array.isArray(c.bir)||c.bir.length!==4||c.bir.some(a=>!Array.isArray(a)||!a.length||a.some(x=>typeof x!=='string'||!x.trim())))throw Error('BIR 범주는 4개 구간이 필요합니다.');
  const values=c.bir.flat();if(new Set(values).size!==values.length)throw Error('BIR 범주가 중복되었습니다.');
  if(c.stages!==undefined)validateStages(c.stages);
@@ -12,12 +18,13 @@ export function validateCriteria(c){
 }
 export function evaluate(sessions,c=DEFAULT_CRITERIA){
  validateCriteria(c);
- const rows=ACTIVE_MOTIONS.map(code=>{
+ const rows=activeMotions(c).map(code=>{
   const s=sessions[code],r=s?.rom;let score=null,value=null,reason='';
   if(!r?.valid||['queued','analyzing','error','cancelled'].includes(s.analysisStatus))reason='분석 미완료';
-  else if(code==='BIR'){value=s.birManualSpineLevel;if(!value)reason='척추 수준 확인 필요';else{score=c.bir.findIndex(a=>a.includes(value));if(score<0){score=null;reason='미등록 척추 수준';}}}
+  else if(code==='BIR'&&c.birMode!=='relative-t'){value=s.birManualSpineLevel;if(!value)reason='척추 수준 확인 필요';else{score=c.bir.findIndex(a=>a.includes(value));if(score<0){score=null;reason='미등록 척추 수준';}}}
+  else if(code==='BIR'){value=r.tRaw;if(r.divisions!==c.birDivisions)reason='BIR 분할 수 변경 · 재계산 필요';else if(Number.isFinite(value))score=c.thresholds.BIR.filter(t=>value<t).length;else reason='t구간 재분석 필요';}
   else if(code==='IRER'&&!s.measurementConfirmed)reason='3D 추정값 확인 필요';
-  else{value=r.maxAngle;if(Number.isFinite(value)&&value>=0&&value<=180)score=c.thresholds[code].filter(t=>value<t).length;else reason='유효 각도 없음';}
+  else{value=code==='FE2'?r.rom:code==='CIR'?r.circularity:r.maxAngle;if(Number.isFinite(value)&&value>=0&&value<=(code==='FE2'?360:180))score=c.thresholds[code].filter(t=>value<t).length;else reason='유효 측정값 없음';}
   return {code,value,score,reason,weight:c.weights[code]};
  });
  const valid=rows.every(r=>r.score!==null);
@@ -69,8 +76,8 @@ export class AutoCapture {
   if(![startSeconds,returnSeconds].every(v=>Number.isFinite(v)&&v>0&&v<=60))throw Error('중립 유지시간은 0초 초과 60초 이하로 입력하세요.');
   this.startMs=startSeconds*1000;this.returnMs=returnSeconds*1000;this.reset();
  }
- reset(){this.phase='waiting';this.since=null;this.moved=false;}
- update({valid,neutral,excursion},now,recording){
+ reset(){this.phase='waiting';this.since=null;this.moved=false;this.extended=false;this.flexed=false;}
+ update({valid,neutral,excursion,motion,extension,flexion},now,recording){
   if(!valid){this.since=null;return null;}
   if(!recording){
    if(this.phase==='done')return null;
@@ -79,13 +86,15 @@ export class AutoCapture {
    if(now-this.since>=this.startMs){this.phase='starting';this.since=null;return 'start';}
   }else{
    if(excursion){this.moved=true;this.since=null;}
+   if(motion==='FE2'){if(extension)this.extended=true;if(this.extended&&flexion)this.flexed=true;if(!this.flexed){this.since=null;return null;}}
    if(this.moved&&neutral){this.since??=now;if(now-this.since>=this.returnMs){this.phase='done';return 'stop';}}
    else this.since=null;
   }
   return null;
  }
 }
-export function poseState(points,world,arm,motion){
+export function poseState(points,world,arm,motion,facing='right'){
+ if(motion==='FE2'){const a=signedElevation(points,arm,facing);return {valid:a!==null,neutral:a!==null&&Math.abs(a)<15,excursion:a!==null&&Math.abs(a)>25,motion,extension:a!==null&&a< -10,flexion:a!==null&&a>30};}
  if(motion==='IRER'){const a=externalRotation(world,arm);return {valid:a!==null,neutral:a!==null&&a<12,excursion:a!==null&&a>20};}
  const s=points?.[arm+'_shoulder'],e=points?.[arm+'_elbow'],w=points?.[arm+'_wrist'],h=points?.[arm+'_hip'];
  if([s,e,w,h].some(p=>!p||(p.visibility??0)<.6))return {valid:false};

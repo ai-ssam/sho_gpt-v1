@@ -30,7 +30,8 @@ export function setupCamera({getContext,onRecorded,onBusy,toast}) {
         const world=r.world?.[0]?Object.fromEntries(POSE_LANDMARKS.map(p=>[p.id,r.world[0][p.index]])):null;
         const recording=recorder?.state==='recording',context=getContext();
         const template=neutralTemplate?.motion===context.motion&&neutralTemplate.arm===context.arm?neutralTemplate:null;
-        const p=template?templatePose(points,context.arm,template):poseState(points,world,context.arm,context.motion);
+        const basePose=poseState(points,world,context.arm,context.motion,context.facing??'right');
+        const p=template?{...basePose,...templatePose(points,context.arm,template)}:basePose;
         if(!countdown){
           const action=auto.update(p,performance.now(),recording);
           if(action==='start')record();if(action==='stop')stop();

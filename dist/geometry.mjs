@@ -28,6 +28,7 @@ export const CONNECTIONS = [
 ];
 
 export const MOTION_LABELS = {
+  FE2: '신전–굴곡 통합',
   AB: "외전",
   FE: "굴곡",
   ER: "신전",
@@ -37,10 +38,11 @@ export const MOTION_LABELS = {
 };
 
 export const MOTION_DEFINITIONS = {
+  FE2: {code:'FE2',name:'신전–굴곡 통합',view:'측면',guide:'팔을 뒤로 최대 이동 → 앞으로 최대 올림 → 중립 복귀',measure:'뒤쪽부터 위쪽까지 전체 가동범위'},
   AB: { code: "AB", name: "외전", view: "정면", guide: "팔을 옆으로 가능한 만큼 올리기", measure: "어깨–팔꿈치 각도" },
   FE: { code: "FE", name: "굴곡", view: "측면", guide: "팔을 앞으로 들어 올리기", measure: "어깨–팔꿈치 각도" },
   ER: { code: "ER", name: "신전", view: "측면", guide: "팔을 뒤로 보내기", measure: "어깨–팔꿈치 각도" },
-  BIR: { code: "BIR", name: "기능적 내회전", view: "후면", guide: "손등을 등 뒤로 올리기", measure: "척추 도달 높이" },
+  BIR: { code: "BIR", name: "기능적 내회전", view: "후면", guide: "손등을 등 뒤로 올리기", measure: "손목 상대 높이 t지표" },
   IRER: { code: "IRER", name: "외회전", view: "정면", guide: "팔꿈치 몸통 옆 · 90° 굽혀 바깥으로 회전", measure: "3D 외회전각 (추정)" },
   CIR: { code: "CIR", name: "회전 궤적", view: "측면", guide: "팔꿈치 90° 후 원 그리기", measure: "궤적·흔들림" }
 };

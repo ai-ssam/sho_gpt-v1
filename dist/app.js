@@ -3,7 +3,9 @@ import {
   editedPointIds, elbowAngles, frameRecord, framesToCsv, nextMonotonicTimestamp, shoulderAngles, summarize,
   templatePoints, trackedHandPoint, resolveRepresentativeFrame, validateAnalysis, usable, visiblePointIds, cirTrack, auditFields
 } from "./analysis.mjs";
-import {ACTIVE_MOTIONS, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs';
+import {ACTIVE_MOTIONS, activeMotions, DEFAULT_CRITERIA, evaluate, mergeRefinement, externalRotation, validateCriteria} from './v5-core.mjs';
+import {signedElevation} from './motion-metrics.mjs';
+import {setupFullV52} from './v52-full-ui.mjs';
 import {setupV5} from './v5-ui.mjs';
 import {setupV52} from './v52-ui.mjs';
 import { setupCamera } from './camera.mjs';
@@ -62,6 +64,7 @@ const elements = {
 };
 
 const state = {
+  examId:crypto.randomUUID(),examCreatedAt:new Date().toISOString(),
   criteria: structuredClone(DEFAULT_CRITERIA), legacyMeasurements: {},
   activeMotion: "AB", sessions: Object.fromEntries(MOTIONS.map(code => [code, emptySession()])),
   currentIndex: 0, selectedPoint: "left_shoulder", page: 1, pageSize: 14,
@@ -168,11 +171,12 @@ function updatePatientGate() {
 }
 
 function frameAngles(frame) {
+  if(frame.motion==='FE2')return {left:signedElevation(frame.corrected,'left',session().facing??state.defaults?.facing),right:signedElevation(frame.corrected,'right',session().facing??state.defaults?.facing)};
   return frame.motion==='IRER'?{left:externalRotation(frame.worldCorrected??frame.worldRaw,'left'),right:externalRotation(frame.worldCorrected??frame.worldRaw,'right')}:shoulderAngles(frame.corrected);
 }
 function currentFrame() { return session().frames[state.currentIndex] ?? null; }
 
-function isSideMotion(code = state.activeMotion) { return ["FE", "ER", "CIR"].includes(code); }
+function isSideMotion(code = state.activeMotion) { return ["FE2", "FE", "ER", "CIR"].includes(code); }
 
 function measuredPrefix() { return patient().arm === "left" ? "left" : "right"; }
 
@@ -195,6 +199,8 @@ function syncRepresentativeState(item = session()) {
 
 function analysisOptions(item = session()) {
   return {
+    birMode:item.measurementSettings?.birMode??state.criteria.birMode,birDivisions:item.measurementSettings?.birDivisions??state.criteria.birDivisions,
+    facing:item.facing??state.defaults?.facing??'right',fe2ExtensionFrame:item.fe2ExtensionFrame,fe2FlexionFrame:item.fe2FlexionFrame,irerCalibration:item.irerCalibration,irerOptions:item.irerOptions??state.defaults?.irer,
     birTrackingPoint: item.birTrackingPoint, birManualSpineLevel: item.birManualSpineLevel,
     gapFrames: item.gapFrames, gapSeconds: item.gapSeconds,
     cirStartFrame: Number.isInteger(item.cirManualStartFrame) ? item.cirManualStartFrame : undefined,
@@ -450,8 +456,9 @@ async function analyzeSession(code,item,signal) {
     if(signal.aborted)return;
     const previousManualSource=item.frames[item.manualRepresentativeFrame]?.sourceFrame;
     const refining=!!item.refineRange;
-    if(refining)frames=mergeRefinement(item.frames,frames);
-    const rom=analyzeRom(frames,arm,code,{gapFrames:item.gapFrames,gapSeconds:item.gapSeconds,birManualSpineLevel:refining?item.birManualSpineLevel:null});
+    if(!refining){item.fe2ExtensionFrame=null;item.fe2FlexionFrame=null;}
+    if(refining){const extSource=item.frames[item.fe2ExtensionFrame]?.sourceFrame,flexSource=item.frames[item.fe2FlexionFrame]?.sourceFrame;frames=mergeRefinement(item.frames,frames);if(extSource!=null)item.fe2ExtensionFrame=frames.findIndex(f=>f.sourceFrame===extSource);if(flexSource!=null)item.fe2FlexionFrame=frames.findIndex(f=>f.sourceFrame===flexSource);}
+    const rom=analyzeRom(frames,arm,code,{...analysisOptions(item),gapFrames:item.gapFrames,gapSeconds:item.gapSeconds,birManualSpineLevel:refining?item.birManualSpineLevel:null});
     item.performance={elapsedMs:performance.now()-startedAt,delegate:engine.delegate,processedFrames:targets.length};
     item.measurementConfirmed=false;
     const previousBirLevel=item.birManualSpineLevel,previousBirTracking=item.birTrackingPoint;
@@ -468,6 +475,7 @@ async function analyzeSession(code,item,signal) {
       item.snapshot=captureSnapshot(representative,rom,{item,code,arm,video,decodedTime:decoded.mediaTime});
       item.snapshotSourceFrame=representative.index;
     }
+    if(code==='FE2')await captureEndpoints(item,video,arm,signal);
   } finally {
     signal.removeEventListener('abort',abort);video.pause();video.removeAttribute('src');video.load();video.remove();
     if(engine.lowMemory)engine.reset();
@@ -773,7 +781,7 @@ function renderRomFocus() {
 
 function renderMotionResultStrip() {
   elements.motionResultStrip.innerHTML = "";
-  for (const code of MOTIONS) {
+  for (const code of activeMotions(state.criteria)) {
     const item = state.sessions[code];
     const definition = MOTION_DEFINITIONS[code];
     const button = document.createElement("button");
@@ -1008,6 +1016,7 @@ function patientPayload() {
     measurements[code] = {
       ...auditFields(item,item.measuredArm||patient().arm,code),
       analysisRange:item.analysisRange, measurementConfirmed:item.measurementConfirmed,performance:item.performance, captureSettings:item.captureSettings, neutralTemplate:item.neutralTemplate,
+      measurementSettings:item.measurementSettings,facing:item.facing,fe2ExtensionFrame:item.fe2ExtensionFrame,fe2FlexionFrame:item.fe2FlexionFrame,endpointImages:item.endpointImages,irerCalibration:item.irerCalibration,irerOptions:item.irerOptions,editHistory:item.editHistory,
       autoRom:item.autoRom, birManualSpineLevel:item.birManualSpineLevel, birTrackingPoint:item.birTrackingPoint,
       analysisStatus:item.analysisStatus,analysisError:item.analysisError,videoWidth:item.videoWidth,videoHeight:item.videoHeight,
       stillImageDecodeVerification:item.stillImageDecodeVerification,stillImageSeekTime:item.stillImageSeekTime,
@@ -1030,17 +1039,18 @@ function patientPayload() {
     };
   }
   return {
-    schemaVersion: "5.0", appVersion:"5.2.0", patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
+    schemaVersion: "5.0", appVersion:"5.2.0",examId:state.examId,examCreatedAt:state.examCreatedAt,activeMotions:activeMotions(state.criteria), patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
     privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
   };
 }
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("shoulder-rom-lab", 1);
+    const request = indexedDB.open("shoulder-rom-lab", 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("patients")) db.createObjectStore("patients", { keyPath: "patient.id" });
+      if(!db.objectStoreNames.contains('exams')){const exams=db.createObjectStore('exams',{keyPath:'examId'});const cursor=request.transaction.objectStore('patients').openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;const value=c.value;value.examId??='legacy-'+String(c.key);exams.put(value);c.continue();};}
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -1050,8 +1060,9 @@ function openDatabase() {
 async function dbPut(record) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction("patients", "readwrite");
-    transaction.objectStore("patients").put(record);
+    record.examId??=crypto.randomUUID();
+    const transaction = db.transaction("exams", "readwrite");
+    transaction.objectStore("exams").put(record);
     transaction.oncomplete = () => {db.close();resolve();};
     transaction.onabort = transaction.onerror = () => {db.close();reject(transaction.error||Error('저장이 취소되었습니다.'));};
   });
@@ -1060,18 +1071,18 @@ async function dbPut(record) {
 async function dbGet(id) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const request = db.transaction("patients").objectStore("patients").get(id);
-    request.onsuccess = () => resolve(request.result ?? null);
-    request.onerror = () => reject(request.error);
+    const request = db.transaction("exams").objectStore("exams").get(id);
+    request.onsuccess = () => {db.close();resolve(request.result ?? null);};
+    request.onerror = () => {db.close();reject(request.error);};
   });
 }
 
 async function dbGetAll() {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const request = db.transaction("patients").objectStore("patients").getAll();
-    request.onsuccess = () => resolve(request.result ?? []);
-    request.onerror = () => reject(request.error);
+    const request = db.transaction("exams").objectStore("exams").getAll();
+    request.onsuccess = () => {db.close();resolve(request.result ?? []);};
+    request.onerror = () => {db.close();reject(request.error);};
   });
 }
 
@@ -1082,8 +1093,8 @@ async function refreshSavedPatientList(selectedId = "") {
     elements.savedPatients.innerHTML = '<option value="">저장 환자 선택</option>';
     for (const record of records) {
       const option = document.createElement("option");
-      option.value = record.patient.id;
-      option.textContent = `${record.patient.id}${record.patient.name ? ` · ${record.patient.name}` : ""} · ${record.patient.age}세`;
+      option.value = record.examId;
+      option.textContent = `${record.patient.id}${record.patient.name ? ` · ${record.patient.name}` : ""} · ${record.patient.age}세 · ${record.examCreatedAt??record.updatedAt}`;
       elements.savedPatients.appendChild(option);
     }
     if (selectedId) elements.savedPatients.value = selectedId;
@@ -1099,7 +1110,16 @@ async function regenerateCurrentSnapshot() {
     const decoded=await seekDecodedFrame(video,item.frames[index].time,item.sourceFps);
     item.snapshot=captureSnapshot(item.frames[index],item.rom,{item,code,arm,video,decodedTime:decoded.mediaTime});
     item.snapshotSourceFrame=index;
+    if(code==='FE2')await captureEndpoints(item,video,arm);
   }finally{video.pause();video.removeAttribute('src');video.load();video.remove();}
+}
+
+async function captureEndpoints(item,video,arm,signal){
+ item.endpointImages={};
+ for(const [name,index]of [['extension',item.rom?.extensionFrameIndex],['flexion',item.rom?.flexionFrameIndex]]){
+  const f=item.frames[index];if(!f)continue;const decoded=await seekDecodedFrame(video,f.time,item.sourceFps,{signal});
+  item.endpointImages[name]={sourceFrame:f.sourceFrame,time:f.time,angle:name==='extension'?item.rom.minAngle:item.rom.maxAngle,image:captureSnapshot(f,item.rom,{item:{...item},code:'FE2',arm,video,decodedTime:decoded.mediaTime})};
+ }
 }
 
 async function applyRepresentativeFrame(index, manual = true) {
@@ -1267,7 +1287,7 @@ async function loadVideoFile(file, cameraSettings=null) {
     validationTolerance: Number(elements.validationTolerance.value) || 0,
     loadToken: `${Date.now()}-${Math.random().toString(36).slice(2)}`
   };
-  Object.assign(activeSession,info,{sourceFps:info.sourceFps||cameraSettings?.frameRate||activeSession.sourceFps,cameraSettings,measuredArm:patient().arm,captureSettings:cameraSettings?.captureSettings??null,neutralTemplate:cameraSettings?.neutralTemplate??null});
+  Object.assign(activeSession,info,{sourceFps:info.sourceFps||cameraSettings?.frameRate||activeSession.sourceFps,cameraSettings,measuredArm:patient().arm,captureSettings:cameraSettings?.captureSettings??null,neutralTemplate:cameraSettings?.neutralTemplate??null,measurementSettings:{birMode:state.criteria.birMode,birDivisions:state.criteria.birDivisions},facing:state.defaults?.facing??'right',irerOptions:structuredClone(state.defaults?.irer??{}),frameStep:state.defaults?.frameStep??activeSession.frameStep});
   boundPatient=patient();
   elements.sourceFps.value=String(activeSession.sourceFps);
   state.sessions[code] = activeSession;
@@ -1456,7 +1476,7 @@ elements.savePatient.addEventListener("click", async () => {
       record.videos[code]=item.sourceFile;
     }}
     await dbPut(record);
-    await refreshSavedPatientList(patient().id);
+    await refreshSavedPatientList(state.examId);
     renderResults();
     showToast("결과와 원본 영상을 이 PC 브라우저에 함께 저장했습니다.");
   } catch (error) {
@@ -1483,6 +1503,7 @@ elements.loadPatient.addEventListener("click", async () => {
     elements.armInputs.forEach(input => { input.checked = input.value === record.patient.arm; });
     boundPatient=patient();
     state.criteria=record.criteria?validateCriteria(record.criteria):structuredClone(DEFAULT_CRITERIA);
+    state.examId=record.examId??crypto.randomUUID();state.examCreatedAt=record.examCreatedAt??record.updatedAt;
     state.legacyMeasurements=record.measurements?.CIR?{CIR:record.measurements.CIR}:{};
     state.sessions = Object.fromEntries(MOTIONS.map(code => {
       const saved = record.measurements?.[code] ?? {};
@@ -1552,13 +1573,18 @@ $('#new-patient').onclick=()=>{
 $('#delete-patient').onclick=async()=>{
   const id=elements.savedPatients.value;if(!id){showToast('삭제할 저장 환자를 선택하세요.');return;}
   if(!confirm(`${id}의 이 브라우저 저장 결과를 삭제할까요? JSON 백업이 없으면 복구할 수 없습니다.`))return;
-  try{const db=await openDatabase();await new Promise((resolve,reject)=>{const tx=db.transaction('patients','readwrite');tx.objectStore('patients').delete(id);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);});await refreshSavedPatientList();showToast('저장 기록을 삭제했습니다. 기존 JSON 백업이 있으면 복원할 수 있습니다.');}catch(error){showToast('삭제에 실패했습니다: '+error.message);}
+  try{const db=await openDatabase();await new Promise((resolve,reject)=>{const tx=db.transaction('exams','readwrite');tx.objectStore('exams').delete(id);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);});await refreshSavedPatientList();showToast('선택 검사 기록을 삭제했습니다. 기존 JSON 백업이 있으면 복원할 수 있습니다.');}catch(error){showToast('삭제에 실패했습니다: '+error.message);}
 };
 function validateImport(data) {
   if(!['3.0','4.0','5.0'].includes(data.schemaVersion)||!data.patient?.id||!['left','right'].includes(data.patient.arm)||!data.measurements)throw Error('지원하는 Shoulder ROM Lab JSON이 아닙니다.');
   for(const [code,item] of Object.entries(data.measurements)){
     if(![...MOTIONS,'CIR'].includes(code)||!Array.isArray(item.frames)||item.frames.length>30000)throw Error('동작/프레임 형식이 잘못되었습니다.');
     if(item.snapshot&&!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(item.snapshot))throw Error('잘못된 대표 이미지 형식입니다.');
+    for(const endpoint of Object.values(item.endpointImages??{}))if(endpoint?.image&&!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(endpoint.image))throw Error('잘못된 극점 이미지 형식입니다.');
+    if(item.facing&&!['left','right'].includes(item.facing))throw Error('FE2 촬영 방향 오류');
+    for(const key of ['fe2ExtensionFrame','fe2FlexionFrame'])if(item[key]!=null&&(!Number.isInteger(item[key])||item[key]<0||item[key]>=item.frames.length))throw Error('FE2 극점 프레임 오류');
+    if(item.measurementSettings?.birMode==='relative-t'&&(!Number.isInteger(item.measurementSettings.birDivisions)||item.measurementSettings.birDivisions<1||item.measurementSettings.birDivisions>100))throw Error('BIR 분할 수 오류');
+    if(item.irerCalibration){const c=item.irerCalibration;if(!['left','right'].includes(c.arm)||!['wrist','fist'].includes(c.reference)||![c.forearm,c.oppositeUpper].every(v=>Number.isFinite(v)&&v>0))throw Error('IRER 개인 보정 오류');}
     item.frames.forEach((frame,index)=>{if(frame.index!==index||!Number.isFinite(frame.time)||frame.time<0||!['미분류','준비','진입','최대ROM','복귀','완료'].includes(frame.phase)||frame.motion!==code)throw Error('프레임 데이터 검증 실패');for(const {id}of LANDMARKS)for(const type of ['raw','corrected']){const p=frame[type]?.[id];if(!p||![p.x,p.y].every(Number.isFinite)||Math.abs(p.x)>10||Math.abs(p.y)>10)throw Error('관절점 좌표 검증 실패');}});
   }
   if(data.criteria)validateCriteria(data.criteria);
@@ -1566,7 +1592,7 @@ function validateImport(data) {
 }
 $('#import-json').onchange=async event=>{
   const file=event.target.files[0];if(!file)return;
-  try{if(file.size>100*1024*1024)throw Error('JSON은 100 MB 이하여야 합니다.');const data=validateImport(JSON.parse(await file.text()));const existing=await dbGet(data.patient.id);if(existing&&!confirm('같은 환자번호의 저장 기록을 JSON 내용으로 교체할까요?'))return;await dbPut(data);await refreshSavedPatientList(data.patient.id);showToast('JSON을 복원했습니다. 불러오기를 눌러 확인하세요.');}catch(error){showToast(error.message);}finally{event.target.value='';}
+  try{if(file.size>100*1024*1024)throw Error('JSON은 100 MB 이하여야 합니다.');const data=validateImport(JSON.parse(await file.text()));data.examId??=crypto.randomUUID();const existing=await dbGet(data.examId);if(existing&&!confirm('같은 검사 ID의 저장 기록을 JSON 내용으로 교체할까요?'))return;await dbPut(data);await refreshSavedPatientList(data.examId);showToast('JSON을 복원했습니다. 불러오기를 눌러 확인하세요.');}catch(error){showToast(error.message);}finally{event.target.value='';}
 };
 function jobLabel(item) {
   return ({queued:'분석 대기',analyzing:'분석 중 '+Math.round((item.analysisProgress||0)*100)+'%',complete:'분석 완료',review:'수동 확인 필요',error:'분석 실패',cancelled:'분석 취소'})[item.analysisStatus]|| (item.frames.length?'저장 결과':'영상 미등록');
@@ -1582,11 +1608,11 @@ function setView(view) {
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function renderWorkflow() {
-  const status=workflowStatus(state.sessions);
-  $('#workflow-status').textContent=state.view==='detail'?'원본·자동값은 보존됩니다. 수정 후 반영하면 최종 결과에 적용됩니다.':status.uploaded+' / 5 동작 등록 · '+status.complete+' / 5 분석 처리 완료'+(status.pending.length?' · 다른 동작을 등록하는 동안에도 분석합니다.':'')+(status.errors.length?' · 실패한 동작은 다시 분석하세요.':'');
+  const motions=activeMotions(state.criteria),status=workflowStatus(state.sessions,motions);
+  $('#workflow-status').textContent=state.view==='detail'?'원본·자동값은 보존됩니다. 수정 후 반영하면 최종 결과에 적용됩니다.':status.uploaded+' / '+motions.length+' 동작 등록 · '+status.complete+' / '+motions.length+' 분석 처리 완료'+(status.pending.length?' · 다른 동작을 등록하는 동안에도 분석합니다.':'')+(status.errors.length?' · 실패한 동작은 다시 분석하세요.':'');
   $('#final-analysis').disabled=!status.canFinalize||!!state.cameraBusy;
   $('#job-list').replaceChildren();
-  for(const code of MOTIONS) {
+  for(const code of motions) {
     const item=state.sessions[code],card=document.createElement('div');card.className='job-item'+(item.analysisStatus==='error'?' error':'');
     const title=document.createElement('b');title.textContent=code+' · '+MOTION_DEFINITIONS[code].name;
     const text=document.createElement('span');text.textContent=jobLabel(item);
@@ -1604,13 +1630,14 @@ function renderWorkflow() {
 function renderFinalSummary() {
   document.dispatchEvent(new window.Event('v5-render'));
   $('#final-summary').replaceChildren();
-  for(const code of MOTIONS) {
+  for(const code of activeMotions(state.criteria)) {
     const item=state.sessions[code],card=document.createElement('article');card.className='final-motion';
     const title=document.createElement('h3');title.textContent=code+' · '+MOTION_DEFINITIONS[code].name;
     const value=document.createElement('strong');value.textContent=primaryRomText(item.rom);
     const detail=document.createElement('p');detail.textContent=item.analysisError||item.rom?.secondaryLabel||jobLabel(item);
     const button=document.createElement('button');button.className='button primary';button.textContent='상세결과 · 관절점 수정';button.disabled=!item.frames.length||['queued','analyzing'].includes(item.analysisStatus);button.onclick=()=>openDetail(code);
     card.append(title,value,detail,button);
+    if(item.endpointImages){const pair=document.createElement('div');pair.className='v52-endpoints';for(const [label,entry]of Object.entries(item.endpointImages)){const figure=document.createElement('figure'),image=document.createElement('img'),caption=document.createElement('figcaption');image.src=entry.image;image.alt=label==='extension'?'최대 신전':'최대 굴곡';caption.textContent=image.alt+' · '+entry.time.toFixed(3)+'초';figure.append(image,caption);pair.append(figure);}card.append(pair);}
     if(['error','cancelled'].includes(item.analysisStatus)){const retry=document.createElement('button');retry.className='button ghost';retry.textContent='다시 분석';retry.disabled=!item.videoUrl;retry.onclick=()=>queue.enqueue(code,item);card.append(retry);}
     $('#final-summary').append(card);
   }
@@ -1642,7 +1669,7 @@ const queue=new AnalysisQueue(analyzeSession,()=>{
 });
 state.view='capture';state.draft=null;
 $('#final-analysis').onclick=()=>{
-  if(!workflowStatus(state.sessions).canFinalize)return;
+  if(!workflowStatus(state.sessions,activeMotions(state.criteria)).canFinalize)return;
   for(const code of MOTIONS){const item=state.sessions[code];if(!item.analysisStatus&&item.videoUrl)queue.enqueue(code,item);}
   setView('results');renderResults();
 };
@@ -1650,7 +1677,7 @@ $('#back-upload').onclick=()=>{setView('capture');selectMotion(state.activeMotio
 $('#discard-detail').onclick=discardDetail;
 $('#apply-detail').onclick=applyDetail;
 $('#save-final').onclick=()=>elements.savePatient.click();
-const camera=setupCamera({getContext:()=>({valid:patientValid(),motion:state.activeMotion,arm:patient().arm,patientId:patient().id}),onBusy:value=>{state.cameraBusy=value;lockWorkspace(value);renderWorkflow();},onRecorded:async(file,settings,context)=>{if(context.patientId!==patient().id||context.motion!==state.activeMotion||context.arm!==patient().arm)throw Error('촬영 당시 환자/동작과 다릅니다. 촬영 원본 저장 후 올바른 측정에 업로드하세요.');await loadVideoFile(file,settings);},toast:showToast});
+const camera=setupCamera({getContext:()=>({valid:patientValid(),motion:state.activeMotion,arm:patient().arm,patientId:patient().id,facing:state.defaults?.facing??'right'}),onBusy:value=>{state.cameraBusy=value;lockWorkspace(value);renderWorkflow();},onRecorded:async(file,settings,context)=>{if(context.patientId!==patient().id||context.motion!==state.activeMotion||context.arm!==patient().arm)throw Error('촬영 당시 환자/동작과 다릅니다. 촬영 원본 저장 후 올바른 측정에 업로드하세요.');await loadVideoFile(file,settings);},toast:showToast});
 window.addEventListener("resize", resizeOverlay);
 window.addEventListener('pagehide',event=>{
   // A cached page can return with its original DOM/state. Revoking blob URLs
@@ -1672,4 +1699,5 @@ try{
 }catch{/* Invalid or unavailable session storage must not prevent startup. */}
 setupV5({state,session,patient,camera,queue,engine,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload});
 setupV52({state,session,patient,camera,queue,selectMotion,setView,renderAll,showToast});
+setupFullV52({state,session,patient,camera,queue,selectMotion,setView,renderAll,showToast,recalculateCurrentRom,selectFrame,renderWorkflow});
 export {state,session,selectMotion,openDetail,applyDetail,setView,patientPayload,validateImport,renderAll,queue};

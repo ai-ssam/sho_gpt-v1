@@ -1,10 +1,11 @@
-export const MOTIONS=['AB','FE','ER','BIR','IRER'];
-export function workflowStatus(sessions) {
+export const MOTIONS=['AB','FE2','BIR','IRER'];
+export function workflowStatus(sessions,motions=MOTIONS) {
+  const MOTIONS=motions;
   const uploaded=MOTIONS.filter(code=>sessions[code]?.fileName).length;
   const complete=MOTIONS.filter(code=>['complete','review'].includes(sessions[code]?.analysisStatus)).length;
   const errors=MOTIONS.filter(code=>sessions[code]?.analysisStatus==='error');
   const pending=MOTIONS.filter(code=>['queued','analyzing'].includes(sessions[code]?.analysisStatus));
-  return {uploaded,complete,errors,pending,canFinalize:uploaded===5,ready:complete===5};
+  return {uploaded,complete,errors,pending,canFinalize:uploaded===MOTIONS.length&&MOTIONS.length>0,ready:complete===MOTIONS.length&&MOTIONS.length>0};
 }
 // One inference job at a time. Replacing one motion never cancels another motion.
 export class AnalysisQueue {
