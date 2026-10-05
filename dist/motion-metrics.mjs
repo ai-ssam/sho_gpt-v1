@@ -39,6 +39,41 @@ export function calibrateIRER(points,arm,reference='wrist'){
  if(upper<.04||forearm<.04)throw Error('보정 길이가 너무 짧습니다. 전완을 영상면과 평행하게 펼치세요.');
  return {id:crypto.randomUUID(),createdAt:new Date().toISOString(),arm,reference,forearm,oppositeUpper:upper,shoulderWidth:good(points[arm+'_shoulder'])?distance(s,points[arm+'_shoulder'],aspect):null,aspectRatio:aspect,rawPoints:structuredClone(points),method:'plane-parallel-length',clinicalValidation:false};
 }
+// Single frontal-camera geometry. No world coordinates or inferred depth are used.
+export function irer2D(points,arm,calibration=null,options={}){
+ const warnings=[],method='irer-2d-asin-v1',other=arm==='left'?'right':'left';
+ const fail=reason=>({angle:null,valid:false,quality:'확인 필요',warnings:[...warnings,reason],method,reference:calibration?.reference??'wrist'});
+ if(!['left','right'].includes(arm))return fail('측정팔 선택 필요');
+ if(calibration&&calibration.arm!==arm)return fail('개인 보정 측정팔 불일치');
+ const reference=calibration?.reference??'wrist',s=points?.[arm+'_shoulder'],e=points?.[arm+'_elbow'],w=points?.[arm+'_'+(reference==='fist'?'hand_tip':'wrist')],os=points?.[other+'_shoulder'],oe=points?.[other+'_elbow'],ow=points?.[other+'_wrist'];
+ if(![s,e,w,os,oe].every(good))return fail('양쪽 어깨·측정팔 팔꿈치/손·반대팔 팔꿈치 검출 부족');
+ if(reference==='fist'&&w.status!=='manual')return fail('주먹 끝은 수동 지정 필요');
+ const aspect=s.aspectRatio||1,upper=distance(os,oe,aspect),outward=Math.sign(s.x-os.x);
+ if(upper<.04||Math.abs(s.x-os.x)*aspect<.04||!outward)return fail('정면 자세·반대팔 길이 확인');
+ let length,scale=1,source;
+ if(calibration){
+  if(!(calibration.forearm>0&&calibration.oppositeUpper>0))return fail('개인 길이 보정 오류');
+  scale=upper/calibration.oppositeUpper;length=calibration.forearm*scale;source='personal-calibration';
+  if(Math.abs(scale-1)>(options.scaleTolerance??.25))warnings.push('보정 시점 대비 촬영 거리 변화');
+  if(calibration.shoulderWidth&&Math.abs(distance(s,os,aspect)/(calibration.shoulderWidth*scale)-1)>.2)warnings.push('몸통 회전·정면 촬영 확인');
+ }else{
+  if(!good(ow))return fail('반대팔 손목 검출 또는 개인 길이 보정 필요');
+  length=distance(oe,ow,aspect);source='opposite-forearm';warnings.push('반대팔 전완 길이 참조 · 좌우 길이 동일 가정');
+ }
+ if(!Number.isFinite(length)||length<.04)return fail('전완 기준 길이 부족');
+ // Opposite arm must hang down in the image; do not apply a 3D elbow-angle gate.
+ const oppositeFore=good(ow)?distance(oe,ow,aspect):null;
+ if(oe.y<=os.y||Math.abs(oe.x-os.x)*aspect>upper*.35)return fail('반대팔 상완을 곧게 내려주세요');
+ if(oppositeFore&&(ow.y<=oe.y||Math.abs(ow.x-oe.x)*aspect>oppositeFore*.35))return fail('반대팔 전완을 곧게 내려주세요');
+ const elbowOffset=(e.x-s.x)*aspect*outward,displacement=(w.x-e.x)*aspect*outward,ratio=displacement/length;
+ if(Math.abs(elbowOffset)>upper*.3)return fail('측정팔 팔꿈치 몸통 이탈');
+ if(e.y<=s.y||Math.abs(w.y-e.y)>length*.25)return fail('팔꿈치 높이·전완 수평 확인');
+ if(Math.abs(s.y-os.y)>upper*.2)return fail('어깨 들림·몸통 기울기');
+ if(ratio<0||ratio>1)return fail('손 이동비율 범위 밖 (0~1) · 관절점/기준 길이 확인');
+ const angle=Math.asin(ratio)*180/Math.PI;
+ if(ratio>.95)warnings.push('90° 근처: 위치·길이 오차 민감');
+ return {angle,valid:true,quality:warnings.some(x=>x.includes('촬영 거리')||x.includes('몸통 회전'))?'확인 필요':source==='personal-calibration'?'비교 가능':'반대팔 참조',warnings,method,reference,length,scale,source,ratio,displacement,elbowOffset,shoulderX:s.x,elbowY:e.y,clinicalValidation:false};
+}
 export function irerAuxiliary(points,arm,calibration,worldAngle,options={}){
  const warnings=[],tolerance=options.maxDifference??15,scaleTolerance=options.scaleTolerance??.25;
  if(!calibration||calibration.arm!==arm)return {angle:null,warnings:['개인 전완 길이 보정 필요'],quality:'보정 없음'};

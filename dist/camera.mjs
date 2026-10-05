@@ -1,4 +1,4 @@
-import {AutoCapture,poseState} from './v5-core.mjs';
+import {AutoCapture,poseState} from './v5-core.mjs?v=5.2.0-irer2d';
 import {InferenceClient} from './inference.mjs';
 import {POSE_LANDMARKS} from './geometry.mjs';
 import {templatePose,DEFAULT_CAPTURE} from './neutral.mjs';

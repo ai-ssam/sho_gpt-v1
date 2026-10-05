@@ -1,6 +1,5 @@
 import {ACTIVE_MOTIONS,DEFAULT_CRITERIA,activeMotions,validateCriteria} from './v5-core.mjs';
-import {calibrateIRER,irerAuxiliary} from './motion-metrics.mjs';
-import {externalRotation} from './v5-core.mjs';
+import {calibrateIRER,irer2D} from './motion-metrics.mjs?v=5.2.0-irer2d';
 import {templateStore,validateCapture,postureFeatures} from './neutral.mjs';
 import {setupAdminTabs} from './admin-tabs.mjs?v=5.2.0-admin3';
 
@@ -69,7 +68,7 @@ export function setupFullV52(api){
   $('#full-detail').hidden=state.view!=='detail'||!['FE2','IRER'].includes(state.activeMotion);$('#full-fe2').hidden=state.activeMotion!=='FE2';$('#full-irer').hidden=state.activeMotion!=='IRER';const item=session(),r=item.rom;
   $('#detail-facing').value=item.facing??state.defaults.facing;
   if(state.activeMotion==='FE2')$('#fe2-info').textContent=`신전 ${r?.minAngle?.toFixed(1)??'—'}° → 굴곡 ${r?.maxAngle?.toFixed(1)??'—'}° · 전체 ${r?.rom?.toFixed(1)??'—'}°`;
-  if(state.activeMotion==='IRER'){const f=item.frames[state.currentIndex],world=f?externalRotation(f.worldCorrected??f.worldRaw,patient().arm):null,aux=irerAuxiliary(f?.corrected,patient().arm,item.irerCalibration,world,item.irerOptions??state.defaults.irer);$('#irer-info').textContent=`3D ${world?.toFixed(1)??'—'}° / 길이 보조 ${aux.angle?.toFixed(1)??'—'}° / 차이 ${aux.difference?.toFixed(1)??'—'}° · ${aux.warnings.join(' / ')||'비교 가능'} · 추정점은 원본 관절점을 덮어쓰지 않습니다.`;}
+  if(state.activeMotion==='IRER'){const f=item.frames[state.currentIndex],m=irer2D(f?.corrected,patient().arm,item.irerCalibration,item.irerOptions??state.defaults.irer);$('#irer-info').textContent=`2D 외회전 ${m.angle?.toFixed(1)??'—'}° · ${m.source==='personal-calibration'?'개인 전완 보정':'반대팔 전완 참조'} · 이동비율 d/L=${m.ratio?.toFixed(3)??'—'} · ${m.warnings.join(' / ')||'자세 조건 통과'} · 깊이 추정 사용 안 함`;}
   if(state.activeMotion==='BIR'&&state.criteria.birMode==='relative-t'){$('#bir-level').closest('label').hidden=true;$('#detail-a-label').textContent='손목 최대 도달 높이';$('#summary-max-label').textContent='손목 최대 도달 높이';$('#detail-a-meta').textContent='골반 t0 · 어깨 t'+(r?.divisions??state.criteria.birDivisions)+' · 손목 기준';}
  }
  function newExam(){state.examId=crypto.randomUUID();state.examCreatedAt=new Date().toISOString();state.criteriaHistory=[];try{state.criteria=validateCriteria(JSON.parse(localStorage.getItem('shoulder:v5:criteria'))??structuredClone(DEFAULT_CRITERIA));}catch{state.criteria=structuredClone(DEFAULT_CRITERIA);}const radio=$(`input[name="arm"][value="${state.defaults.arm}"]`);radio.checked=true;$('#frame-step').value=state.defaults.frameStep;notify();renderWorkflow();selectMotion(activeMotions(state.criteria)[0]);}
@@ -80,5 +79,6 @@ export function setupFullV52(api){
  const grid=$('.motion-grid');for(const code of ACTIVE_MOTIONS){const card=grid.querySelector(`[data-motion="${code}"]`);if(card)grid.append(card);}
  fields();render();
  setupAdminTabs(settings);
+ $('#full-difference').closest('label').hidden=true;
  unifiedRows();
 }

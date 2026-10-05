@@ -1,5 +1,5 @@
 import { angleAt } from './geometry.mjs';
-import {signedElevation} from './motion-metrics.mjs';
+import {signedElevation,irer2D} from './motion-metrics.mjs?v=5.2.0-irer2d';
 export const ACTIVE_MOTIONS=['AB','FE2','BIR','IRER','FE','ER','CIR'];
 export const DEFAULT_MOTIONS=['AB','FE2','BIR','IRER'];
 export const DEFAULT_CRITERIA={version:'sample-v52-full-1',label:'동작 의심도점수',activeMotions:[...DEFAULT_MOTIONS],birDivisions:10,birMode:'relative-t',weights:{AB:25,FE2:35,BIR:15,IRER:25,FE:0,ER:0,CIR:0},thresholds:{AB:[150,120,90],FE2:[200,160,120],BIR:[8,5,2],FE:[150,120,90],ER:[40,30,20],IRER:[60,40,20],CIR:[90,75,50]},bir:[['T1','T2','T3','T4','T5','T6','T7','above_T1'],['T8','T9','T10','T11','T12'],['L1','L2','L3','L4','L5'],['천골','sacrum','buttock_or_below','unable_to_reach_behind_back']]};
@@ -23,7 +23,7 @@ export function evaluate(sessions,c=DEFAULT_CRITERIA){
   if(!r?.valid||['queued','analyzing','error','cancelled'].includes(s.analysisStatus))reason='분석 미완료';
   else if(code==='BIR'&&c.birMode!=='relative-t'){value=s.birManualSpineLevel;if(!value)reason='척추 수준 확인 필요';else{score=c.bir.findIndex(a=>a.includes(value));if(score<0){score=null;reason='미등록 척추 수준';}}}
   else if(code==='BIR'){value=r.tRaw;if(r.divisions!==c.birDivisions)reason='BIR 분할 수 변경 · 재계산 필요';else if(Number.isFinite(value))score=c.thresholds.BIR.filter(t=>value<t).length;else reason='t구간 재분석 필요';}
-  else if(code==='IRER'&&!s.measurementConfirmed)reason='3D 추정값 확인 필요';
+  else if(code==='IRER'&&!s.measurementConfirmed)reason='2D 길이비·자세 확인 필요';
   else if(code==='IRER'&&s.irerCalibration&&r.auxiliary?.quality!=='비교 가능')reason='IRER 보정 품질 확인 필요';
   else{value=code==='FE2'?r.rom:code==='CIR'?r.circularity:r.maxAngle;if(Number.isFinite(value)&&value>=0&&value<=(code==='FE2'?360:180))score=c.thresholds[code].filter(t=>value<t).length;else reason='유효 측정값 없음';}
   return {code,value,score,reason,weight:c.weights[code]};
@@ -96,12 +96,11 @@ export class AutoCapture {
 }
 export function poseState(points,world,arm,motion,facing='right'){
  if(motion==='FE2'){const a=signedElevation(points,arm,facing);return {valid:a!==null,neutral:a!==null&&Math.abs(a)<15,excursion:a!==null&&Math.abs(a)>25,motion,extension:a!==null&&a< -10,flexion:a!==null&&a>30};}
- if(motion==='IRER'){const a=externalRotation(world,arm);return {valid:a!==null,neutral:a!==null&&a<12,excursion:a!==null&&a>20};}
+ if(motion==='IRER'){const a=irer2D(points,arm).angle;return {valid:a!==null,neutral:a!==null&&a<12,excursion:a!==null&&a>20};}
  const s=points?.[arm+'_shoulder'],e=points?.[arm+'_elbow'],w=points?.[arm+'_wrist'],h=points?.[arm+'_hip'];
  if([s,e,w,h].some(p=>!p||(p.visibility??0)<.6))return {valid:false};
  const angle=angleAt(e,s,h),bend=angleAt(s,e,w),length=Math.hypot(s.x-h.x,s.y-h.y);
  if(!Number.isFinite(angle)||!Number.isFinite(bend)||length<.08)return {valid:false};
- if(motion==='IRER'){const a=externalRotation(world,arm);return {valid:a!==null,neutral:a!==null&&a<12,excursion:a!==null&&a>20};}
  return {valid:true,neutral:angle<18&&bend>145,excursion:motion==='BIR'?bend<110||w.y<h.y-.15*length:angle>30};
 }
 export function mergeRefinement(original,refined){

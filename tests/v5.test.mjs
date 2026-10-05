@@ -19,6 +19,21 @@ import {trackedHandPoint} from '../dist/analysis.mjs';
 import {makeTemplate,templatePose,validateCapture,templateStore} from '../dist/neutral.mjs';
 import {indexedDB} from 'fake-indexeddb';
 import {signedElevation,fe2Metrics,birHeight,calibrateIRER,irerAuxiliary} from '../dist/motion-metrics.mjs';
+import {irer2D} from '../dist/motion-metrics.mjs';
+import {poseState} from '../dist/v5-core.mjs';
+test('IRER 2D opposite forearm reference: 0/30/60/90°, mirror and no world dependency',()=>{
+ const p=(x,y)=>({x,y,visibility:1,aspectRatio:1});const points={left_shoulder:p(.7,.2),left_elbow:p(.7,.5),left_wrist:p(.7,.75),right_shoulder:p(.3,.2),right_elbow:p(.3,.5),right_wrist:p(.3,.5)};
+ for(const angle of [0,30,60,90]){points.right_wrist.x=.3-.25*Math.sin(angle*Math.PI/180);const m=irer2D(points,'right');assert.ok(Math.abs(m.angle-angle)<1e-5);assert.equal(m.source,'opposite-forearm');const mirror=Object.fromEntries(Object.entries(points).map(([id,v])=>[id.replace('left','TEMP').replace('right','left').replace('TEMP','right'),{...v,x:1-v.x}]));assert.ok(Math.abs(irer2D(mirror,'left').angle-angle)<1e-5);}
+ const r=analyzeRom([{corrected:points,worldRaw:{},sourceFrame:0,time:0}],'right','IRER');assert.equal(r.valid,true);assert.ok(Math.abs(r.maxAngle-90)<1e-5);assert.equal(r.method,'irer-2d-asin-v1');assert.equal(r.diagnostics.length,1);assert.equal(poseState(points,null,'right','IRER').excursion,true);points.right_wrist.x=.3;assert.equal(poseState(points,null,'right','IRER').neutral,true);
+ points.right_wrist.x=-.01;assert.equal(irer2D(points,'right').angle,null);
+ points.right_wrist.x=.2;points.right_elbow.x=.5;assert.match(irer2D(points,'right').warnings.join(),/몸통 이탈/);
+});
+test('IRER 2D personal calibration, correction, aspect ratio and straight reference arm gates',()=>{
+ const p=(x,y)=>({x,y,visibility:1,aspectRatio:2});const points={left_shoulder:p(.7,.2),left_elbow:p(.7,.5),left_wrist:p(.7,.8),right_shoulder:p(.3,.2),right_elbow:p(.3,.5),right_wrist:p(.175,.5)};
+ const c=calibrateIRER(points,'right');points.right_wrist.x=.2375;const m=irer2D(points,'right',c);assert.ok(Math.abs(m.angle-30)<1e-5);assert.equal(m.source,'personal-calibration');
+ points.right_wrist.visibility=0;assert.equal(irer2D(points,'right',c).angle,null);points.right_wrist.status='manual';assert.ok(Math.abs(irer2D(points,'right',c).angle-30)<1e-5);
+ points.left_wrist.x=.9;assert.equal(irer2D(points,'right').angle,null);
+});
 import {validateSettingsBackup} from '../dist/v52-full-ui.mjs';
 import {drawMeasurementSector} from '../dist/angle-sector.mjs';
 
