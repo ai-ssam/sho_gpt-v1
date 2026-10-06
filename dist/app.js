@@ -1044,7 +1044,7 @@ function patientPayload() {
     };
   }
   return {
-    schemaVersion: "5.0", appVersion:"5.2.0",examId:state.examId,examCreatedAt:state.examCreatedAt,activeMotions:activeMotions(state.criteria), patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
+    schemaVersion: "5.0", appVersion:"5.4.0",releaseName:"v5.4 irer2D",examId:state.examId,examCreatedAt:state.examCreatedAt,activeMotions:activeMotions(state.criteria), patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
     criteriaHistory:state.criteriaHistory??[],privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
   };
 }

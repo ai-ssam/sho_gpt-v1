@@ -1,4 +1,10 @@
-# Shoulder ROM Lab v5.2.0
+# Shoulder ROM Lab v5.4 irer2D
+
+2026-10-06 버전 보관본. v5.2의 IRER 2D 구현 커밋 `68b50c3`를 기준으로 독립 폴더 `shoulder-rom-lab-v5.4-irer2D` 및 Git 브랜치 `work/v5.4-irer2D`로 저장했습니다. 앱/결과 버전은 5.4.0이며 동작 알고리즘은 변경하지 않았습니다. 기존 v5.2와 운영 main은 그대로 유지합니다.
+
+실행: 이 폴더에서 `npm ci` 후 `npm run dev` 또는 `start-local.bat`. 주소는 **http://localhost:4175/** 입니다. 아래 v5.2 기록의 4174 주소는 이전 버전 정보입니다. 포트별 브라우저 저장소는 별도이므로 이전 검사/설정은 ZIP·JSON 백업으로 옮겨야 합니다. 사용자 기준 CSV 2개는 로컬에만 함께 보관하며 GitHub 업로드에서 제외합니다.
+
+검증: 전체 자동 테스트 50개 통과·2개 건너뜀. 실측 정확도 미검증. [IRER 2D 추출방법](docs/irer-2d-algorithm.md).
 
 ## v5.2 추가 구현 (2026-10-04)
 
