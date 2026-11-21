@@ -5,6 +5,8 @@ import {
 } from "./analysis.mjs?v=5.2.0-irer2d";
 import {ACTIVE_MOTIONS, activeMotions, DEFAULT_CRITERIA, evaluate, mergeRefinement, validateCriteria} from './v5-core.mjs?v=5.2.0-irer2d';
 import {signedElevation,irer2D} from './motion-metrics.mjs?v=5.2.0-irer2d';
+import {irerFrame,sessionIRER,normalizeIRER} from './irer-methods.mjs';
+import {decorateResults,renderIRERComparison} from './results-overview.mjs';
 import {drawMeasurementSector,drawIRERGuides} from './angle-sector.mjs?v=5.2.0-irer2d';
 import {setupFullV52} from './v52-full-ui.mjs?v=5.2.0-irer2d';
 import {setupV5} from './v5-ui.mjs?v=5.2.0-irer2d';
@@ -173,7 +175,7 @@ function updatePatientGate() {
 
 function frameAngles(frame) {
   if(frame.motion==='FE2')return {left:signedElevation(frame.corrected,'left',session().facing??state.defaults?.facing),right:signedElevation(frame.corrected,'right',session().facing??state.defaults?.facing)};
-  return frame.motion==='IRER'?Object.fromEntries(['left','right'].map(arm=>[arm,irer2D(frame.corrected,arm,session().irerCalibration?.arm===arm?session().irerCalibration:null,session().irerOptions).angle])):shoulderAngles(frame.corrected);
+  return frame.motion==='IRER'?Object.fromEntries(['left','right'].map(arm=>[arm,irerFrame(frame,arm,sessionIRER(session()),session().irerCalibration?.arm===arm?session().irerCalibration:null).angle])):shoulderAngles(frame.corrected);
 }
 function currentFrame() { return session().frames[state.currentIndex] ?? null; }
 
@@ -201,7 +203,7 @@ function syncRepresentativeState(item = session()) {
 function analysisOptions(item = session()) {
   return {
     birMode:item.measurementSettings?.birMode??state.criteria.birMode,birDivisions:item.measurementSettings?.birDivisions??state.criteria.birDivisions,
-    facing:item.facing??state.defaults?.facing??'right',fe2ExtensionFrame:item.fe2ExtensionFrame,fe2FlexionFrame:item.fe2FlexionFrame,irerCalibration:item.irerCalibration,irerOptions:item.irerOptions??state.defaults?.irer,
+    facing:item.facing??state.defaults?.facing??'right',fe2ExtensionFrame:item.fe2ExtensionFrame,fe2FlexionFrame:item.fe2FlexionFrame,irerCalibration:item.irerCalibration,irerOptions:sessionIRER(item),
     birTrackingPoint: item.birTrackingPoint, birManualSpineLevel: item.birManualSpineLevel,
     gapFrames: item.gapFrames, gapSeconds: item.gapSeconds,
     cirStartFrame: Number.isInteger(item.cirManualStartFrame) ? item.cirManualStartFrame : undefined,
@@ -444,7 +446,7 @@ async function analyzeSession(code,item,signal) {
       } else {points=templatePoints(0);missed++;}
       for(const point of Object.values(points)){point.aspectRatio=video.videoWidth/video.videoHeight;point.status=usable(point)?'detected':'missing';}
       const frame=frameRecord({index:i,time,motion:code,points,source:result.poses?.length?(withHands?'Pose+Hand':'Pose'):'미검출·수동보정 필요'});
-      if(code!=='IRER'&&result.world?.[0]){
+      if((code!=='IRER'||sessionIRER(item).mode!=='2d')&&result.world?.[0]){
         frame.worldRaw=Object.fromEntries(POSE_LANDMARKS.map(p=>[p.id,{...result.world[0][p.index]}]));
         frame.worldCorrected=structuredClone(frame.worldRaw);
       }
@@ -596,8 +598,8 @@ function captureSnapshot(frame, rom, options={}) {
   if (item.videoUrl && video.readyState >= 2) imageCtx.drawImage(video, 0, 0, width, height);
   else { imageCtx.fillStyle = "#101614"; imageCtx.fillRect(0, 0, width, height); }
   if(!options.item)drawCirTrajectory(imageCtx, width, height);
-  if(code==='IRER')drawIRERGuides(imageCtx,width,height,frame,arm);
-  drawMeasurementSector(imageCtx,width,height,frame,arm,code,code==='IRER'?irer2D(frame.corrected,arm,item.irerCalibration,item.irerOptions).angle:null);
+  if(code==='IRER'&&sessionIRER(item).primary==='2d')drawIRERGuides(imageCtx,width,height,frame,arm);
+  drawMeasurementSector(imageCtx,width,height,frame,arm,code,code==='IRER'?irerFrame(frame,arm,sessionIRER(item),item.irerCalibration).angle:null,sessionIRER(item).primary);
   drawSkeleton(imageCtx, width, height, frame,null,arm,code);
   imageCtx.fillStyle = "rgba(7,19,15,.78)";
   imageCtx.fillRect(14, 14, Math.min(width - 28, 370), 58);
@@ -607,10 +609,10 @@ function captureSnapshot(frame, rom, options={}) {
   imageCtx.fillStyle = "#dbe8e3";
   imageCtx.font = "12px system-ui";
   const mode = item.representativeSelectionType === "manual" ? "수동 대표" : "자동 대표";
-  const angle=code==='FE2'?signedElevation(frame.corrected,arm,item.facing??state.defaults?.facing):code==='BIR'?elbowAngles(frame.corrected)[arm]:code==='IRER'?irer2D(frame.corrected,arm,item.irerCalibration,item.irerOptions).angle:shoulderAngles(frame.corrected)[arm];
+  const angle=code==='FE2'?signedElevation(frame.corrected,arm,item.facing??state.defaults?.facing):code==='BIR'?elbowAngles(frame.corrected)[arm]:code==='IRER'?irerFrame(frame,arm,sessionIRER(item),item.irerCalibration).angle:shoulderAngles(frame.corrected)[arm];
   imageCtx.fillText(`원본 #${(frame.sourceFrame ?? frame.index) + 1} · ${frame.time.toFixed(3)}초 · ${mode} · 현재각 ${angle?.toFixed(1)??'—'}°`, 28, 59);
   const image=canvas.toDataURL("image/jpeg", 0.84);
-  item.snapshotOverlayVersion=3;
+  item.snapshotOverlayVersion=4;
   canvas.width=1;canvas.height=1;
   return image;
 }
@@ -646,7 +648,7 @@ function drawOverlay() {
   if (!frame) return;
   if (!session().videoUrl) drawCoordinateBackground(width, height);
   drawCirTrajectory(ctx, width, height, state.currentIndex);
-  if(state.activeMotion==='IRER')drawIRERGuides(ctx,width,height,frame,measuredPrefix());
+  if(state.activeMotion==='IRER'&&sessionIRER(session()).primary==='2d')drawIRERGuides(ctx,width,height,frame,measuredPrefix());
   drawSkeleton(ctx, width, height, frame, state.selectedPoint);
 }
 
@@ -833,7 +835,7 @@ function renderResults() {
   elements.summaryMinTime.textContent = minFrame ? `${minFrame.time.toFixed(3)}초 · 원본 프레임 ${(minFrame.sourceFrame ?? minFrame.index) + 1}` : "최소 프레임 —";
   elements.summaryQuality.textContent = summary.quality == null ? "—" : `${Math.round(summary.quality * 100)}%`;
   elements.summaryFrames.textContent = `분석 프레임 ${summary.frameCount}개`;
-  elements.chartTitle.textContent = state.activeMotion==='IRER'?`${armName()} 외회전각 (2D 길이비)`:state.activeMotion === "CIR" ? `${armName()} 엄지 끝 궤적 (손목 대체 없음)` : `${armName()} 어깨각 변화`;
+  elements.chartTitle.textContent = state.activeMotion==='IRER'?`${armName()} 외회전각 (${sessionIRER(session()).primary==='2d'?'2D 길이비':'기존 3D 추정'})`:state.activeMotion === "CIR" ? `${armName()} 엄지 끝 궤적 (손목 대체 없음)` : `${armName()} 어깨각 변화`;
   elements.chartLegend.hidden = state.activeMotion === "CIR";
   renderMotionDetail();
   renderRepresentativeTools();
@@ -884,7 +886,7 @@ function renderChart(frames) {
     const y = pad.top + innerH - (Math.max(0, Math.min(180, value)) / 180) * innerH;
     return value==null?null:`${x.toFixed(1)},${y.toFixed(1)}`;
   }).filter(Boolean).join(" ");
-  if(!isSideMotion())svg.appendChild(svgNode("polyline", { points: toPoints(oppositeSide), fill: "none", stroke: "#aeb9b4", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  if(!isSideMotion()&&state.activeMotion!=='IRER')svg.appendChild(svgNode("polyline", { points: toPoints(oppositeSide), fill: "none", stroke: "#aeb9b4", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
   svg.appendChild(svgNode("polyline", { points: toPoints(measuredSide), fill: "none", stroke: "#0f8b73", "stroke-width": 3.5, "stroke-linejoin": "round", "stroke-linecap": "round" }));
   const rom = session().rom;
   for (const index of [rom?.minFrameIndex, rom?.maxFrameIndex].filter(Number.isInteger)) {
@@ -1021,7 +1023,7 @@ function patientPayload() {
     measurements[code] = {
       ...auditFields(item,item.measuredArm||patient().arm,code),
       analysisRange:item.analysisRange, measurementConfirmed:item.measurementConfirmed,performance:item.performance, captureSettings:item.captureSettings, neutralTemplate:item.neutralTemplate,
-      measurementSettings:item.measurementSettings,facing:item.facing,fe2ExtensionFrame:item.fe2ExtensionFrame,fe2FlexionFrame:item.fe2FlexionFrame,endpointImages:item.endpointImages,irerCalibration:item.irerCalibration,irerOptions:item.irerOptions,editHistory:item.editHistory,
+      measurementSettings:item.measurementSettings,facing:item.facing,fe2ExtensionFrame:item.fe2ExtensionFrame,fe2FlexionFrame:item.fe2FlexionFrame,endpointImages:item.endpointImages,irerCalibration:item.irerCalibration,irerOptions:code==='IRER'?sessionIRER(item):item.irerOptions,editHistory:item.editHistory,
       autoRom:item.autoRom, birManualSpineLevel:item.birManualSpineLevel, birTrackingPoint:item.birTrackingPoint,
       analysisStatus:item.analysisStatus,analysisError:item.analysisError,videoWidth:item.videoWidth,videoHeight:item.videoHeight,
       stillImageDecodeVerification:item.stillImageDecodeVerification,stillImageSeekTime:item.stillImageSeekTime,
@@ -1044,7 +1046,7 @@ function patientPayload() {
     };
   }
   return {
-    schemaVersion: "5.0", appVersion:"5.4.0",releaseName:"v5.4 irer2D",examId:state.examId,examCreatedAt:state.examCreatedAt,activeMotions:activeMotions(state.criteria), patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
+    schemaVersion: "5.0", appVersion:"5.5.0-dev",releaseName:"v5.5 overview + IRER modes (development)",examId:state.examId,examCreatedAt:state.examCreatedAt,activeMotions:activeMotions(state.criteria), patient: patient(), measurements, criteria:structuredClone(state.criteria), evaluation:evaluate(state.sessions,state.criteria),
     criteriaHistory:state.criteriaHistory??[],privacy: "originals_saved_locally_with_results_when_saving", updatedAt: new Date().toISOString()
   };
 }
@@ -1595,6 +1597,7 @@ function validateImport(data) {
     if(item.facing&&!['left','right'].includes(item.facing))throw Error('FE2 촬영 방향 오류');
     for(const key of ['fe2ExtensionFrame','fe2FlexionFrame'])if(item[key]!=null&&(!Number.isInteger(item[key])||item[key]<0||item[key]>=item.frames.length))throw Error('FE2 극점 프레임 오류');
     if(item.measurementSettings?.birMode==='relative-t'&&(!Number.isInteger(item.measurementSettings.birDivisions)||item.measurementSettings.birDivisions<1||item.measurementSettings.birDivisions>100))throw Error('BIR 분할 수 오류');
+    if(item.irerOptions)normalizeIRER(item.irerOptions);
     if(item.irerCalibration){const c=item.irerCalibration;if(!['left','right'].includes(c.arm)||!['wrist','fist'].includes(c.reference)||![c.forearm,c.oppositeUpper].every(v=>Number.isFinite(v)&&v>0))throw Error('IRER 개인 보정 오류');}
     item.frames.forEach((frame,index)=>{if(frame.index!==index||!Number.isFinite(frame.time)||frame.time<0||!['미분류','준비','진입','최대ROM','복귀','완료'].includes(frame.phase)||frame.motion!==code)throw Error('프레임 데이터 검증 실패');for(const {id}of LANDMARKS)for(const type of ['raw','corrected']){const p=frame[type]?.[id];if(!p||![p.x,p.y].every(Number.isFinite)||Math.abs(p.x)>10||Math.abs(p.y)>10)throw Error('관절점 좌표 검증 실패');}});
   }
@@ -1655,6 +1658,7 @@ function renderFinalSummary() {
     if(['error','cancelled'].includes(item.analysisStatus)){const retry=document.createElement('button');retry.className='button ghost';retry.textContent='다시 분석';retry.disabled=!item.videoUrl;retry.onclick=()=>queue.enqueue(code,item);card.append(retry);}
     $('#final-summary').append(card);
   }
+  decorateResults({state,patient:patient(),evaluate,openDetail});
 }
 function openDetail(code) {
   const item=state.sessions[code];if(!item.frames.length)return;
@@ -1686,13 +1690,13 @@ $('#final-analysis').onclick=async()=>{
   if(!workflowStatus(state.sessions,activeMotions(state.criteria)).canFinalize)return;
   for(const code of MOTIONS){const item=state.sessions[code];if(!item.analysisStatus&&item.videoUrl)queue.enqueue(code,item);}
   setView('results');renderResults();
-  for(const code of activeMotions(state.criteria)){const item=state.sessions[code];if(item.videoUrl&&item.frames.length&&(!item.snapshot||item.snapshotOverlayVersion!==3)){try{await regenerateCurrentSnapshot(item,code);if(state.view==='results')renderResults();}catch(error){showToast(code+' 대표사진 생성 실패: '+error.message);}}}
+  for(const code of activeMotions(state.criteria)){const item=state.sessions[code];if(item.videoUrl&&item.frames.length&&(!item.snapshot||item.snapshotOverlayVersion!==4)){try{await regenerateCurrentSnapshot(item,code);if(state.view==='results')renderResults();}catch(error){showToast(code+' 대표사진 생성 실패: '+error.message);}}}
 };
 $('#back-upload').onclick=()=>{setView('capture');selectMotion(state.activeMotion);};
 $('#discard-detail').onclick=discardDetail;
 $('#apply-detail').onclick=applyDetail;
 $('#save-final').onclick=()=>elements.savePatient.click();
-const camera=setupCamera({getContext:()=>({valid:patientValid(),motion:state.activeMotion,arm:patient().arm,patientId:patient().id,facing:state.defaults?.facing??'right'}),onBusy:value=>{state.cameraBusy=value;lockWorkspace(value);renderWorkflow();},onRecorded:async(file,settings,context)=>{if(context.patientId!==patient().id||context.motion!==state.activeMotion||context.arm!==patient().arm)throw Error('촬영 당시 환자/동작과 다릅니다. 촬영 원본 저장 후 올바른 측정에 업로드하세요.');await loadVideoFile(file,settings);},toast:showToast});
+const camera=setupCamera({getContext:()=>({valid:patientValid(),motion:state.activeMotion,arm:patient().arm,patientId:patient().id,facing:state.defaults?.facing??'right',irerOptions:state.defaults?.irer??{},irerCalibration:null}),onBusy:value=>{state.cameraBusy=value;lockWorkspace(value);renderWorkflow();},onRecorded:async(file,settings,context)=>{if(context.patientId!==patient().id||context.motion!==state.activeMotion||context.arm!==patient().arm)throw Error('촬영 당시 환자/동작과 다릅니다. 촬영 원본 저장 후 올바른 측정에 업로드하세요.');await loadVideoFile(file,settings);},toast:showToast});
 window.addEventListener("resize", resizeOverlay);
 window.addEventListener('beforeunload',event=>{if(state.cameraBusy||queue.running||state.draft||hasUnsavedExam()){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',event=>{
@@ -1716,4 +1720,5 @@ try{
 setupV5({state,session,patient,camera,queue,engine,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload});
 setupV52({state,session,patient,camera,queue,selectMotion,setView,renderAll,showToast});
 setupFullV52({state,session,patient,camera,queue,selectMotion,setView,renderAll,showToast,recalculateCurrentRom,selectFrame,renderWorkflow});
+document.addEventListener('v5-render',()=>{decorateResults({state,patient:patient(),evaluate,openDetail});renderIRERComparison({item:session(),arm:patient().arm,index:state.currentIndex,active:state.activeMotion==='IRER'&&state.view==='detail',onSelect:selectFrame});});
 export {state,session,selectMotion,openDetail,applyDetail,setView,patientPayload,validateImport,renderAll,recalculateCurrentRom,queue};

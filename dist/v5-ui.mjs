@@ -1,5 +1,6 @@
 import {createArchive} from './archive.mjs';
 import {ACTIVE_MOTIONS,activeMotions,DEFAULT_CRITERIA,DEFAULT_STAGES,evaluate,validateCriteria} from './v5-core.mjs?v=5.2.0-irer2d';
+import {sessionIRER} from './irer-methods.mjs';
 export function setupV5(api){
  const {state,session,patient,camera,queue,selectMotion,setView,selectFrame,renderAll,showToast,analyzeSession,recalculateCurrentRom,discardDetail,patientPayload}=api;
  const $=s=>document.querySelector(s);
@@ -134,7 +135,7 @@ export function setupV5(api){
   if(document.activeElement!==$('#v5-range-end')&&!$('#v5-range-end').value)$('#v5-range-end').value=item.duration||'';
   $('#v5-refine').disabled=busy;$('#v5-range-apply').disabled=busy;
   $('#v5-world').hidden=state.activeMotion!=='IRER'||state.view!=='detail';
-  $('#v5-world h3').textContent='IRER 2D 길이비 확인';$('#v5-world p').textContent='어깨 세로선·팔꿈치 높이 기준으로 손목을 추적합니다. 2D 관절점 수정이 각도에 반영됩니다. 깊이 좌표는 사용하지 않습니다.';$('#v5-world-fields').hidden=true;$('#v5-world-apply').hidden=true;
+  const ir=sessionIRER(item),show3D=ir.mode!=='2d';$('#v5-world h3').textContent=show3D?'IRER 계산 방식·3D 좌표 확인':'IRER 2D 길이비 확인';$('#v5-world p').textContent=show3D?'2D 좌표 수정은 2D 각도에만, 아래 3D 좌표 수정은 기존 3D 각도에만 반영됩니다. 점수는 선택한 주 계산만 사용합니다.':'어깨 세로선·팔꿈치 높이 기준으로 손목을 추적합니다. 2D 관절점 수정이 각도에 반영됩니다. 깊이 좌표는 사용하지 않습니다.';$('#v5-world-fields').hidden=!show3D;$('#v5-world-apply').hidden=!show3D;$('#v5-world-apply').disabled=!item.frames[state.currentIndex]?.worldRaw;
   $('#v5-confirm').checked=!!item.measurementConfirmed;
   const f=item.frames[state.currentIndex],key=state.activeMotion+':'+state.currentIndex+':'+item.updatedAt+':'+state.view;
   if(key!==frameKey){frameKey=key;$('#v5-world-fields').replaceChildren();for(const [id,p]of Object.entries(f?.worldCorrected??f?.worldRaw??{})){

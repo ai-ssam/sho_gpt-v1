@@ -1,4 +1,5 @@
 import {fe2Metrics,birHeight,irer2D} from './motion-metrics.mjs?v=5.2.0-irer2d';
+import {irerSummary} from './irer-methods.mjs';
 // v5 measurement policy; CIR remains available for legacy records.
 export * from './geometry.mjs';
 import { shoulderAngles, elbowAngles, LANDMARKS, isEdited } from './geometry.mjs';
@@ -114,13 +115,7 @@ export function analyzeRom(frames,arm='right',motion='AB',options={}) {
   const min=angles.reduce((a,b)=>b.value<a.value?b:a,{index:null,value:Infinity}),max=angles.reduce((a,b)=>b.value>a.value?b:a,{index:null,value:-Infinity});
   const base={motion,arm,rom:angles.length?max.value-min.value:null,minAngle:angles.length?min.value:null,maxAngle:angles.length?max.value:null,minFrameIndex:min.index,maxFrameIndex:max.index,representativeFrameIndex:max.index,primaryLabel:'어깨 가동범위',primaryValue:angles.length?+(max.value-min.value).toFixed(1):'미검출',primaryUnit:'°',secondaryLabel:angles.length?`${min.value.toFixed(1)}° → ${max.value.toFixed(1)}°`:'유효 관절점 부족',valid:angles.length>0,validFrames:angles.length};
   if(motion==='IRER') {
-    const samples=frames.map((f,index)=>({index,measurement:irer2D(f.corrected,arm,options.irerCalibration,options.irerOptions)}));
-    const rows=samples.filter(r=>Number.isFinite(r.measurement.angle)).map(r=>({...r,value:r.measurement.angle}));
-    const diagnostics=samples.map(r=>({index:r.index,sourceFrame:frames[r.index].sourceFrame,time:frames[r.index].time,...r.measurement}));
-    if(!rows.length)return {...base,valid:false,rom:null,minAngle:null,maxAngle:null,primaryValue:'확인 필요',primaryLabel:'외회전각 (2D 길이비)',primaryUnit:'',secondaryLabel:[...new Set(samples.flatMap(r=>r.measurement.warnings))].join(' / '),representativeFrameIndex:0,method:'irer-2d-asin-v1',diagnostics};
-    const lo=rows.reduce((a,b)=>a.value<b.value?a:b),hi=rows.reduce((a,b)=>a.value>b.value?a:b);
-    const auxiliary=hi.measurement;
-    return {...base,valid:true,rom:hi.value-lo.value,minAngle:lo.value,maxAngle:hi.value,minFrameIndex:lo.index,maxFrameIndex:hi.index,representativeFrameIndex:hi.index,primaryValue:+hi.value.toFixed(1),primaryLabel:'최대 외회전각 (2D 길이비)',primaryUnit:'°',secondaryLabel:(auxiliary.source==='personal-calibration'?'개인 전완 보정':'반대팔 전완 참조')+' · '+auxiliary.warnings.join(' / '),validFrames:rows.length,method:auxiliary.method,diagnostics,auxiliary,calibration:options.irerCalibration??null};
+    return {...base,...irerSummary(frames,arm,options.irerOptions,options.irerCalibration)};
   }
   if(motion==='BIR') {
     if(options.birMode==='relative-t'){
